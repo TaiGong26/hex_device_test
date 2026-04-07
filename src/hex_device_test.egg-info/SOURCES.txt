@@ -8,9 +8,11 @@ src/hex_device_test.egg-info/top_level.txt
 src/hex_device_test/controllers/ArmController.py
 src/hex_device_test/controllers/BaseController.py
 src/hex_device_test/controllers/__init__.py
+src/hex_device_test/controllers/messages.py
 src/hex_device_test/managers/BaseCoordinator.py
 src/hex_device_test/managers/Coordinator.py
 src/hex_device_test/managers/__init__.py
 src/hex_device_test/managers/config_base.py
-src/hex_device_test/managers/message_bus.py
 src/hex_device_test/test/arm_test.py
+src/hex_device_test/tools/__init__.py
+src/hex_device_test/tools/plotjuggle.py

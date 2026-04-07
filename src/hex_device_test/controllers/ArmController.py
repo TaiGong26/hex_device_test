@@ -10,6 +10,7 @@ import copy
 
 from hex_device import HexDeviceApi
 from hex_device import Arm, CommandType, Hands
+from ..tools.plotjuggle import senders
 
 from .BaseController import BaseController
 # from hex_device_testDemo.managers.Coordinator import Coordinator
@@ -28,6 +29,40 @@ from .BaseController import BaseController
  - Exit
 
 """
+
+class ArmControllerStatus:
+    Disconnected = 0
+    Init = 1
+    Ready = 2
+    Running = 3
+    HoldPosition = 4
+    Stopped = 5
+    Exit = 6
+    Error = 7
+
+
+class TrajectoryController:
+    def __init__(self):
+        pass
+    
+    def get_target_position(self,current_position):
+        # 传递当前位姿，计算下一时刻的目标位姿；可以选择不传递，由控制器自己维护状态
+        pass
+    
+    def startController(self):
+        pass
+    
+    # def set_current_position(self, position):
+    #     pass
+    
+    # 平滑
+    def _smooth_step(self, t):
+        """S-curve interpolation function that provides smooth acceleration and deceleration"""
+        # Limit t to [0,1] range
+        t = max(0.0, min(1.0, t))
+        
+        # Use 5th degree polynomial for smoother interpolation: 6t⁵ - 15t⁴ + 10t³
+        return 6 * t**5 - 15 * t**4 + 10 * t**3
 
 class TrajectoryPlanner:
     """Trajectory planner that supports smooth acceleration and deceleration planning"""
@@ -164,7 +199,6 @@ class ArmController(BaseController):
         self.device = None
         self.device_optional = None
         self._task_thread = None
-        self.start_thread=threading.Thread(target=self.start,daemon=True)
         # self.status = ArmControllerStatus.Disconnected
         
         self._task_loop_hz = task_loop_hz
@@ -172,6 +206,7 @@ class ArmController(BaseController):
         self._arm_config = None
         self._waypoints = None
         self._current_cmd = None
+        self._view = False
         
         self.trajectory_player: Optional[TrajectoryPlanner] = None
         self.loop_count = 0
@@ -181,6 +216,12 @@ class ArmController(BaseController):
         self._home_position = tuple([0.0, -1.5, 3.00, 0.0, 0.0, 0.0])
         self._return_home_duration = 10
         self._return_home = None
+        
+        self._start_time = None
+        
+        self._status_machine = ArmControllerStatus.Disconnected
+        
+        self.__HOME_POSITION = tuple([0.0, -1.5, 3.00, 0.0, 0.0, 0.0])
         
         # self._controll_info = {
         #     "trajectory_started": False,
@@ -194,65 +235,92 @@ class ArmController(BaseController):
     # def connect(self):
     #     pass
     
-    def start(self) -> bool:
+    def start(self,timeout:int=3) -> bool:
         
-        self._hex_api = HexDeviceApi(
-            ws_url=self._ws_url, 
-            local_port=0, 
-            enable_kcp=self._enable_kcp, 
-            )
+        try: 
         
-        # add wait for device list to be updated
-        while not self._hex_api.device_list:
-            time.sleep(0.1)
-            
-        for device in self._hex_api.device_list:
-            print(f"[Device {self._device_id}] 发现设备: {device} type: {type(device)}")
-            if isinstance(device, Arm):
-                self.device = device
-                # with self._status_lock:
-                    # self.status = ArmControllerStatus.Init
-                if device.robot_type:
-                    self.robot_type = device.robot_type
-                    # print(f"[Device {self._device_id}] 设备类型: {self.robot_type}")
-                break
-        for device in self._hex_api.device_list:
-            if isinstance(device, Hands):
-                self.device_optional = device
-                break
-        
-        if self.device is None:
-            print("device is None")
-            return False
-        self.device.start()
-        
-        # with self._status_lock:
-            # self.status = ArmControllerStatus.Ready
-        
-        if self._waypoints:
-            self.trajectory_player = TrajectoryPlanner(
-                waypoints=self._waypoints,
-                segment_duration=3.0
+            self._hex_api = HexDeviceApi(
+                ws_url=self._ws_url, 
+                local_port=0, 
+                enable_kcp=self._enable_kcp, 
                 )
-        else:
-            print(f"[Device {self._device_id}] Not waypoints !!!!")
-            return False
-        
-        if self.trajectory_player:
             
-            res = self.trajectory_player.start_trajectory()
-            if res:
-                print(f"[Device {self._device_id}] trajectory player start ")
-            else:
-                print(f"[Device {self._device_id}] Not waypoints failed !!!!")
+            # add wait for device list to be updated
+            start_time= time.time()
+            while not self._hex_api.device_list:
+                if time.time() - start_time > timeout:
+                    print(f"[Device {self._device_id}] Timeout waiting for device list")
+                    return False
+                time.sleep(0.05)
+
+            print(f"[Device {self._device_id}] HexDeviceApi created at {id(self._hex_api)}")
+
+            for device in self._hex_api.device_list:
+                print(f"[Device {self._device_id}] 发现设备: {device} type: {type(device)} robot_type: {device.robot_type}")
+                if isinstance(device, Arm):
+                    self.device = device
+                    if device.robot_type:
+                        self.robot_type = device.robot_type
+                        # print(f"[Device {self._device_id}] 设备类型: {self.robot_type}")
+                    break
+            for device in self._hex_api.device_list:
+                if isinstance(device, Hands):
+                    self.device_optional = device
+                    break
+            
+            if self.device is None:
+                print("device is None")
+                return False
+            self.device.start()
+            
+            ssid = self.device.get_my_session_id()
+            hold_ssid = self.device.get_session_holder()
+            while not ssid or not hold_ssid or ssid != hold_ssid:
+                # if time.time() - start_time > timeout:
+                print(f"[Device {self._device_id}] waiting for session hold:  myssid:{ssid} holdssid:{hold_ssid}")   
+                ssid = self.device.get_my_session_id()
+                hold_ssid = self.device.get_session_holder()
+                time.sleep(0.05)
                 
-        # move to home position
-        
-        self._task_thread = threading.Thread(target=self._task_loop,daemon=True)
-        self._task_thread.start()
-        
-        return True
-   
+            self.set_status("init")
+            print(f"[Device {self._device_id}] device session hold")
+            
+            
+            
+            if self._waypoints:
+                self.trajectory_player = TrajectoryPlanner(
+                    waypoints=self._waypoints,
+                    segment_duration=3.0
+                    )
+            else:
+                print(f"[Device {self._device_id}] Not waypoints !!!!")
+                return False
+            
+            if self.trajectory_player:
+                
+                res = self.trajectory_player.start_trajectory()
+                if res:
+                    print(f"[Device {self._device_id}] trajectory player start ")
+                else:
+                    print(f"[Device {self._device_id}] Not waypoints failed !!!!")
+                    
+            # self._start_time = time.time()
+
+            while device.get_session_holder() != device.get_my_session_id():
+                time.sleep(0.1)
+                print(f"[Device {self._device_id}] waiting for session hold:  myssid:{ssid} holdssid:{hold_ssid}")
+            
+
+            self._task_thread = threading.Thread(target=self._task_loop,daemon=True)
+            self._task_thread.start()
+            
+            return True
+    
+        except Exception as e:
+            print(f"[Device {self._device_id}, Exception]: {e}")
+            traceback.print_exc()
+            return False
+    
     def shutdown(self):
         try:
             # wait all home !!!!!
@@ -260,8 +328,8 @@ class ArmController(BaseController):
             if self._task_thread:
                 if self._task_thread.is_alive():
                     self._task_thread.join(timeout=0.1)
-            
             self._task_thread = None
+            
             if self._hex_api:
                 self._hex_api.close()
             
@@ -273,7 +341,6 @@ class ArmController(BaseController):
         
         except Exception as e:
             print(f"[Device {self._device_id}, Exception]: {e}")
-        
         
     # ==================== setting ====================
     
@@ -290,7 +357,25 @@ class ArmController(BaseController):
     def set_current_cmd(self, cmd:Optional[str]):
         with self._data_lock:
             self._current_cmd = cmd
+            
+    def set_status(self, status:str):
+        with self._status_lock:
+            if status == "init":
+                self._status_machine = ArmControllerStatus.Init
+            elif status == "ready":
+                self._status_machine = ArmControllerStatus.Ready
+            elif status == "running":
+                self._status_machine = ArmControllerStatus.Running
+            elif status == "hold_position":
+                self._status_machine = ArmControllerStatus.HoldPosition
+            elif status == "stopped":
+                self._status_machine = ArmControllerStatus.Stopped
+            elif status == "error":
+                self._status_machine = ArmControllerStatus.Error
     
+    def set_view(self, view:bool):
+        with self._status_lock:
+            self._view = view
     # ==================== getting ====================
     def get_status(self):
         pass
@@ -298,41 +383,197 @@ class ArmController(BaseController):
     def get_thread_is_alive(self):
         pass
     
+    def get_current_status(self):
+        with self._status_lock:
+            if self._status_machine == ArmControllerStatus.Init:
+                return "init"
+            elif self._status_machine == ArmControllerStatus.Ready:
+                return "ready"
+            elif self._status_machine == ArmControllerStatus.Running:
+                return "running"
+            elif self._status_machine == ArmControllerStatus.HoldPosition:
+                return "hold_position"
+            elif self._status_machine == ArmControllerStatus.Stopped:
+                return "stopped"
+            elif self._status_machine == ArmControllerStatus.Error:
+                return "error"
+            elif self._status_machine == ArmControllerStatus.Exit:
+                return "exit"
+            else:
+                return "unknown"
+    
+    # ===================== judge =======================
+    def judge_current_status(self,status:str) -> bool:
+        with self._status_lock:
+            if status == "init":
+                return True
+            elif status == "ready":
+                return True
+            elif status == "running":
+                return True
+            elif status == "hold_position":
+                return True
+            elif status == "stopped":
+                return True
+            elif status == "error":
+                return True
+            elif status == "exit":
+                return True
+            else:
+                return False
+    
+    def judge_cmd(self, cmd:str) -> bool:
+        with self._data_lock:
+            if self._current_cmd == cmd:
+                return True
+            else:
+                return False
+    
+    # ==================== send =======================
+    def send_view_data(self,target_position):
+        _view = False
+        with self._status_lock:
+            _view = self._view
+        
+        if _view == True:
+            device_key = f"device_id_{self._device_id}"
+            data = {}
+
+            # 当前值
+            dev_position = self.device.get_motor_positions()
+            if dev_position is not None:
+                dev_position = dev_position.tolist()
+
+            if target_position is not None and hasattr(target_position, "tolist"):
+                target_position = target_position.tolist()
+
+            # 展开 motor_position
+            if dev_position:
+                for i, v in enumerate(dev_position):
+                    data[f"{device_key}/motor_position/joint{i}"] = float(v)
+
+            # 展开 target_position
+            if target_position:
+                for i, v in enumerate(target_position):
+                    data[f"{device_key}/target_position/joint{i}"] = float(v)
+
+            # 标量
+            data[f"{device_key}/status"] = self._status_machine
+            data[f"{device_key}/ssid"] = self.device.get_my_session_id()
+            data[f"{device_key}/hold_ssid"] = self.device.get_session_holder()
+
+            senders.send_json(data)
+    
     # ==================== task ====================
-    
-    def _move_to_home():
-        pass
-    
+
     def _task_loop(self):
         task_loop_hz = 1 / self._task_loop_hz
+        # task_check_cnt = 0
+        # print(f"[Device {self._device_id}] task loop start time: {self._start_time - time.time()}")
+        if self.device.get_session_holder() != self.device.get_my_session_id():
+            print(f"[Device {self._device_id}] myssid:{self.device.get_my_session_id()} holdssid:{self.device.get_session_holder()}")
+        
+        while not self.judge_current_status("ready"):
+            time.sleep(0.1)
+        self.set_status("running")
+        
+        
         while True: # what is the condition: hex_device_api is running
             try:
+                
+                # =========== get target position ===========
+                target_position = None
+                if self.trajectory_player:
+                    target_position = self.trajectory_player.get_current_target().tolist()
+                
+                # ============ send command to device ============
+                # if self.judge_current_status("running") and target_position is not None:
+                    # self.device.motor_command(
+                    #     CommandType.POSITION,
+                    #     target_position)
+                
+                    # self.send_view_data(target_position)
+                
+                self.device.motor_command(
+                    CommandType.POSITION,
+                    target_position)
+                
+                # ============== judge status machine ==============
+            
+                if self.judge_current_status("init"):
+                    pass
+                elif self.judge_current_status("ready"):
                     
-                        
-                    target_position = None
-                    if self.trajectory_player:
-                        target_position = self.trajectory_player.get_current_target().tolist()
+                    """
+                    从 ready 到 running 的条件：
+                    - 接到home命令，或者 play命令
+                    
+                    ready 状态下的行为：
+                    - 等待命令
+                    - 状态更新
+                    """
+                    pass
+                elif self.judge_current_status("running"):
+                    """
+                    从 running 到 hold_position 的条件：
+                    - 接到 hold_position 命令
+                    从 running 到 ready 的条件：
+                    - 完成home
+                    - 完成单次轨迹
+                    从 running 到 stopped 的条件：
+                    - 接到 stop 命令
+                    从 running 到 error 的条件：
+                    - 设备异常
+                    
+                    running 状态下的行为：
+                    - 持续执行轨迹
+                    - 状态更新
+                    """
+                    pass
+                elif self.judge_current_status("hold_position"):
+                    """
+                    从 hold_position 到 running 的条件：
+                    - 接到 恢复 命令
                     
                     
-                    if target_position:
-                        self.device.motor_command(
-                            CommandType.POSITION,
-                            target_position)
                     
-                    # ============= test ===========
-                    # print(f"[Device {self._device_id}] target_position: {target_position} motor position: {self.device.get_motor_positions()}")
+                    """
+                    pass
+                elif self.judge_current_status("stopped"):
+                    """
+                    从 stopped 到 exit：
+                    - home 完成
                     
-                    time.sleep(task_loop_hz)
+                    stoped 状态下的行为：
+                    - 等待 home 完成
+                    
+                    """
+                    
+                    pass
+                elif self.judge_current_status("error"):
+                    """
+                    从 error 到 stop：
+                    - 接到 stop 命令
+                    
+                    """
+                    pass
+                
+                
+                
+                # ============= print logger ===========
+
+                
+                # ============= update =============
+                time.sleep(task_loop_hz)
+                self.send_view_data(target_position)
                     
                     
                     
             except Exception as e:
                 print(f"[Device {self._device_id}] threading Exception: {e}")
                 traceback.print_exc()
-                # event delegation
             except BrokenBarrierError as e:
                 print(f"[Device {self._device_id}] Waring Barrier broken")
-                # event delegation
             # finally:
             #     print(f"[Device {self._device_id}] finally:  threading exit..")
             

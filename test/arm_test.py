@@ -57,6 +57,13 @@ def main():
         help='Enable KCP protocol for HEX device connection'
     )
     
+    parser.add_argument(
+        '--view',
+        action='store_true',
+        default=False,
+        help='Enable real-time visualization of the robotic arm trajectory'
+    )
+    
     # =============== parse args ===============
     args = parser.parse_args()
     # print(f"args: {args}")
@@ -68,7 +75,7 @@ def main():
         return
     print(f"Device IP list: {dev_ip_list}")
     enable_kcp = args.KCP
-    
+    enable_view = args.view
     # config
     config_dict = {
         'name':'Archer_d6y',
@@ -109,7 +116,8 @@ def main():
             dev_ip_list, 
             enable_kcp, 
             arm_config=config_dict,
-            waypoints=arm_position
+            waypoints=arm_position,
+            enable_view=enable_view
         )
         
         # 信号处理

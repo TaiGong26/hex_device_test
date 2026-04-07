@@ -1,27 +1,42 @@
 from typing import Optional, List
 import threading
 import time
+from enum import Enum
 
 
 from .BaseCoordinator import BaseCoordinator
 from ..controllers.ArmController import ArmController as Controller
-from .message_bus import arm_message_bus
+from collections import deque
+from ..tools.plotjuggle import senders
+
+
+class ArmCoordinatorStatus(Enum):
+    NoneStatus = 0
+    Init = 1
+    Ready = 2
+    Running = 3
+    Stopped = 4
+    Error = 5
+    Exit = 6
 
 
 class ArmCoordinator(BaseCoordinator):
     
-    def __init__(self, device_ws_url_list: Optional[List[dict]] = None, enable_kcp: bool = False, arm_config: Optional[dict] = None, waypoints: Optional[List[dict]] = None):
+    def __init__(self, device_ws_url_list: Optional[List[dict]] = None, enable_kcp: bool = False, arm_config: Optional[dict] = None, waypoints: Optional[List[dict]] = None, enable_view: bool = False):
         super().__init__()
         
         self._coordinator_monitor_loop = None
         self._enable_kcp = enable_kcp
         self._waypoints = waypoints
+        self._enable_view = enable_view
+        # print(f"enable_view: {self._enable_view}")
         
         self.start(device_ws_url_list, enable_kcp, arm_config)
-
-        # self._message_bus = arm_message_bus
     
     def start(self, device_ws_url_list, enable_kcp, arm_config):
+        
+        # senders.start()
+        
         if device_ws_url_list is None:
             print("device ip list is None")
             return False
@@ -39,17 +54,42 @@ class ArmCoordinator(BaseCoordinator):
         
         # event init
         print(f"controllers {len(self._controllers_list)}")
-        self._send_barrier = threading.Barrier(len(self._controllers_list)+1)
-        self._complete_action_barrier = threading.Barrier(len(self._controllers_list)+1)
+        # self._send_barrier = threading.Barrier(len(self._controllers_list)+1)
+        # self._complete_action_barrier = threading.Barrier(len(self._controllers_list)+1)
         
         # setting controllers
         for controller in self._controllers_list:
             controller.set_arm_config(arm_config)
             controller.set_waypoints(self._waypoints)
+            controller.set_view(self._enable_view)
             
-        # controllers start
-        for controller in self._controllers_list:
-            controller.start()
+            
+        
+        # # controllers start
+        res_crl_start = [False] * len(device_ws_url_list)
+        crl_connet_queue = deque()
+        
+        def connect_wrapper(idx, controller):
+          res_crl_start[idx] = controller.start()
+          
+        
+        s =time.time()
+        
+        for idx, controller in enumerate(self._controllers_list):
+            t = threading.Thread(target=connect_wrapper, args=(idx, controller))
+            t.start()
+            crl_connet_queue.append(t)
+        
+        print(f"controllers start time: {time.time() - s}")
+        for t in crl_connet_queue:
+            t.join()
+        
+        for idx, res in enumerate(res_crl_start):
+            if res == False:
+                print(f"controller {idx} start failed")
+        
+        # for controller in self._controllers_list:
+        #     controller.start()
         
         # # # coordinator thread start
         # self._coordinator_monitor_loop: threading.Thread = threading.Thread(target=self._monitor_loop)
@@ -57,24 +97,26 @@ class ArmCoordinator(BaseCoordinator):
     
     
     def shutdown(self):
+        # senders.stop()
         
-        # controllers stop
+        # from threading to stop controllers
+        crl_shutdown_queue = deque()
         with self.controller_lock:
             for controller in self._controllers_list:
-                controller.shutdown()
+                t = threading.Thread(target=controller.shutdown)
+                t.start()
+                crl_shutdown_queue.append(t)      
+        
+        for t in crl_shutdown_queue:
+            t.join(timeout=3.0)
             
         # coordinator thread stop
         if self._coordinator_monitor_loop:
             self._coordinator_monitor_loop.join(timeout=0.1)
             self._coordinator_monitor_loop = None
             
-        # barrier break
-        self._send_barrier.abort()
-        self._complete_action_barrier.abort()
-        
-        
         self._stop_event.set()
-        print("--------------------------------coordinator shutdown")
+        print("-------------------------------- coordinator shutdown ----------------------------------")
 
     def _monitor_loop(self):
         
@@ -96,6 +138,7 @@ class ArmCoordinator(BaseCoordinator):
             cmd = self.cmd_queue.get()
             
             if cmd:
+                
                 with self.controller_lock:
                     for controller in self._controllers_list:
                         isok = controller.put_command(cmd)
@@ -103,9 +146,9 @@ class ArmCoordinator(BaseCoordinator):
                             print(f"[Coordinator] device {controller.get_device_id()} put command failed")
                 
                 # wait for controllers to finish
-                if self._send_barrier:
-                    self._send_barrier.wait()
-                    print("======================= all controllers execute command ============================")
+                # if self._send_barrier:
+                #     self._send_barrier.wait()
+                #     print("======================= all controllers execute command ============================")
                 
                 # for controller in self._controllers_list:
                 #     is_ok = controller.send_command(cmd)
@@ -113,9 +156,9 @@ class ArmCoordinator(BaseCoordinator):
                 #         print(f"[Coordinator] device {controller.get_device_id()} send command failed")
                     
                 # wait for controllers to finish
-                if self._complete_action_barrier:
-                    self._complete_action_barrier.wait()
-                    print("======================= all controllers complete action ============================")
+                # if self._complete_action_barrier:
+                #     self._complete_action_barrier.wait()
+                #     print("======================= all controllers complete action ============================")
                 
             # time.sleep(0.001)
 

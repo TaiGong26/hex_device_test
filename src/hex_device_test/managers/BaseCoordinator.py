@@ -16,41 +16,8 @@ class CoordinatorStatus:
     Running = 3
     Stopped = 4
     Error = 5
-    Exit = 6
+    Exit = 6       
 
-# 状态机类
-class StateMachine:
-    
-    def __init__(self):
-        self._status = CoordinatorStatus.NoneStatus
-        self._status_machine_lock = threading.Lock()
-        
-        self.cmd_queue = Queue(maxsize=50)
-        
-    # next status
-    def set_next_status(self):
-        with self._status_machine_lock:
-            self._status = self._status + 1
-        
-    # Error status
-    def set_error_status(self):
-        with self._status_machine_lock:
-            self._status = CoordinatorStatus.Error
-        
-    # Exit status
-    def set_exit_status(self):
-        with self._status_machine_lock:
-            self._status = CoordinatorStatus.Exit
-    
-    # Ready status
-    def set_ready_status(self):
-        with self._status_machine_lock:
-            self._status = CoordinatorStatus.Ready
-        
-    def get_current_status(self):
-        with self._status_machine_lock:
-            return self._status
-        
 
 class BaseCoordinator(ABC):
     def __init__(self):
@@ -66,6 +33,9 @@ class BaseCoordinator(ABC):
         self._controllers_list = deque()
         
         self._state_machine = CoordinatorStatus.NoneStatus
+        
+        # lock 
+        self._status_lock = threading.Lock()
     
     @abstractmethod
     def start(self):
@@ -79,10 +49,21 @@ class BaseCoordinator(ABC):
     def publish_command(self):
         pass
     
-    @abstractmethod
-    def all_brake_command(self):
-        pass
-    
-    @abstractmethod
-    def all_home_command(self):
-        pass
+    def set_status(self, new_status:str):
+        with self._status_lock:
+            # self._status = new_status
+            if new_status == "init":
+                self._status = CoordinatorStatus.Init
+            elif new_status == "ready":
+                self._status = CoordinatorStatus.Ready
+            elif new_status == "running":
+                self._status = CoordinatorStatus.Running
+            elif new_status == "stopped":
+                self._status = CoordinatorStatus.Stopped
+            elif new_status == "error":
+                self._status = CoordinatorStatus.Error
+            elif new_status == "exit":
+                self._status = CoordinatorStatus.Exit
+            else:
+                print(f"invalid status: {new_status}")
+                return None
