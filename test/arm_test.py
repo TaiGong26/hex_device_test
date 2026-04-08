@@ -128,7 +128,7 @@ def main():
 
         # coordinator.start()
         
-        print(f"coordinator {coordinator}")
+        # print(f"coordinator {coordinator}")
         stop_event.wait()   
         # if coordinator is not None:
         #     cleanup(coordinator)

@@ -35,13 +35,13 @@ class PlotjuggleDraw:
     def start(self):
         """启动发送线程"""
         if self._running:
-            print("[UDPSender] 已经在运行中")
+            print("[Plotjuggle] threading is running")
             return
 
         self._running = True
         self._thread = threading.Thread(target=self._run_task_loop, daemon=True)
         self._thread.start()
-        print("[UDPSender] 线程已启动")
+        print("[Plotjuggle] start threading")
 
     def stop(self):
         """停止发送线程"""
@@ -50,7 +50,7 @@ class PlotjuggleDraw:
             self._socket.close() # 关闭 socket 以打断阻塞
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
-        print("[UDPSender] 已停止")
+        print("[Plotjuggle] end threading")
 
     def send_data(self, data):
         self._socket.sendto(
@@ -67,33 +67,25 @@ class PlotjuggleDraw:
     def add_data(self, data):
         """向发送队列添加数据"""
         with self._data_lock:
-            # if len(self._data_queue) < self._data_queue.maxlen:
-            #     self._data_queue.append(data)
-            # else:
-            #     print("[UDPSender] waring: queue is full, dropping data")
             self._data_queue.append(data)
         
     def _run_task_loop(self):
         """内部发送循环逻辑"""
         try:
             # 在线程内部创建 socket
-            current_time = 0.0
-            
             while self._running:
                 # 判断队列是否有数据
                 with self._data_lock:
                     if self._data_queue:
                         data_to_send = self._data_queue.popleft()
-                        print(f"[UDPSender] 发送数据: {data_to_send['device_id_0']['motor_position']}")
                     else:
                         data_to_send = None
+                        
                 # 发送数据
                 if data_to_send is not None:
                     self.send_json(data_to_send)
-
-                # 更新时间并休眠
-                current_time += 0.05
-                time.sleep(0.05)
+                else:
+                    time.sleep(0.05)
                 
         except Exception as e:
             if self._running: # 如果是运行中报错才打印
@@ -102,58 +94,6 @@ class PlotjuggleDraw:
             if self._socket:
                 self._socket.close()
 
-    # def _run_test_loop(self):
-    #     """内部发送循环逻辑"""
-    #     try:
-    #         # 在线程内部创建 socket
-    #         current_time = 0.0
-            
-    #         while self._running:
-    #             # 1. 构建并发送动态 JSON 数据
-    #             data_dynamic = {
-    #                 "timestamp": current_time,
-    #                 "test_data": {
-    #                     "cos": math.cos(current_time),
-    #                     "sin": math.sin(current_time)
-    #                 }
-    #             }
-    #             # 发送数据
-    #             self._socket.sendto(
-    #                 json.dumps(data_dynamic).encode(), 
-    #                 (self.address, self.port)
-    #             )
-
-    #             # 2. 发送固定的测试字符串 (保留原逻辑)
-    #             test_str = "{ \
-    #               \"1252\": { \
-    #                 \"timestamp\": { \
-    #                   \"microsecond\": 0 \
-    #                 }, \
-    #                 \"value\": { \
-    #                   \"current\": { \
-    #                     \"ampere\": null \
-    #                   }, \
-    #                   \"voltage\": { \
-    #                     \"volt\": 24.852617263793945 \
-    #                   }\
-    #                 }\
-    #               } }"
-                
-    #             self._socket.sendto(
-    #                 test_str.encode("utf-8"), 
-    #                 (self.address, self.port)
-    #             )
-
-    #             # 更新时间并休眠
-    #             current_time += 0.05
-    #             time.sleep(0.05)
-                
-    #     except Exception as e:
-    #         if self._running: # 如果是运行中报错才打印
-    #             print(f"[UDPSender] 发送异常: {e}")
-    #     finally:
-    #         if self._socket:
-    #             self._socket.close()
 
 senders = PlotjuggleDraw()
 

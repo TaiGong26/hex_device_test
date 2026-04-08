@@ -192,6 +192,80 @@ class ReturnHomeController:
 
 
 class ArmController(BaseController):
+    
+    # 状态转移邻接表
+    """
+    init 转移
+    - ready
+    - error
+    - exit
+    
+    ready 可转移：
+    - running
+    - error
+    - stopped
+    
+        从 ready 到 running 的条件：
+        - 接到home命令，或者 play命令
+        
+        ready 状态下的行为：
+        - 等待命令
+        - 状态更新
+    
+    running 可转移:
+    - ready
+    - hold_position
+    - stopped
+    - error
+    
+        从 running 到 hold_position 的条件：
+        - 接到 hold_position 命令
+        
+        从 running 到 ready 的条件：
+        - 完成home
+        - 完成单次轨迹
+        
+        从 running 到 stopped 的条件：
+        - 接到 stop 命令
+        从 running 到 error 的条件：
+        - 设备异常
+    
+        running 状态下的行为：
+        - 持续执行轨迹
+        - 状态更新
+        
+    hold_position 可转移:
+    - running
+    - stopped
+    - error
+    
+        从 hold_position 到 running 的条件：
+        - 接到 恢复 命令
+    
+    从 stopped 到 exit：
+    - home 完成
+    
+    stoped 状态下的行为：
+    - 等待 home 完成
+    
+    从 error 到 stop：
+    - 接到 stop 命令
+    
+    """
+    
+    STATE_MAP = {
+        ArmControllerStatus.Ready: [],
+        ArmControllerStatus.Running: [],
+        ArmControllerStatus.HoldPosition: [],
+        ArmControllerStatus.Stopped: [],
+        ArmControllerStatus.Error: [],
+    }
+    
+    
+    
+    
+    
+    
     def __init__(self, ws_url:str, local_port:int=0, enable_kcp:bool=False, crl_hz:int=500, device_id:int=0,task_loop_hz:int=100):
         super().__init__(ws_url, local_port, enable_kcp, crl_hz, device_id)
         
@@ -225,7 +299,8 @@ class ArmController(BaseController):
     def start(self,timeout:int=3) -> bool:
         
         try: 
-        
+            
+            # creat
             self._hex_api = HexDeviceApi(
                 ws_url=self._ws_url, 
                 local_port=0, 
@@ -240,8 +315,7 @@ class ArmController(BaseController):
                     return False
                 time.sleep(0.05)
 
-            print(f"[Device {self._device_id}] HexDeviceApi created at {id(self._hex_api)}")
-
+            #  find and start device
             for device in self._hex_api.device_list:
                 print(f"[Device {self._device_id}] 发现设备: {device} type: {type(device)} robot_type: {device.robot_type}")
                 if isinstance(device, Arm):
@@ -260,20 +334,11 @@ class ArmController(BaseController):
                 return False
             self.device.start()
             
-            ssid = self.device.get_my_session_id()
-            hold_ssid = self.device.get_session_holder()
-            while not ssid or not hold_ssid or ssid != hold_ssid:
-                # if time.time() - start_time > timeout:
-                print(f"[Device {self._device_id}] waiting for session hold:  myssid:{ssid} holdssid:{hold_ssid}")   
-                ssid = self.device.get_my_session_id()
-                hold_ssid = self.device.get_session_holder()
-                time.sleep(0.05)
-                
-            self.set_status("init")
+            # self.set_status("init")
             print(f"[Device {self._device_id}] device session hold")
             
             
-            
+            # setting and play Trajectory
             if self._waypoints:
                 self.trajectory_player = TrajectoryPlanner(
                     waypoints=self._waypoints,
@@ -292,10 +357,6 @@ class ArmController(BaseController):
                     print(f"[Device {self._device_id}] Not waypoints failed !!!!")
                     
             # self._start_time = time.time()
-
-            while device.get_session_holder() != device.get_my_session_id():
-                time.sleep(0.1)
-                print(f"[Device {self._device_id}] waiting for session hold:  myssid:{ssid} holdssid:{hold_ssid}")
             
             self._loop_running = True
 
@@ -340,21 +401,6 @@ class ArmController(BaseController):
     def set_waypoints(self, waypoints):
         with self._data_lock:
             self._waypoints = copy.deepcopy(waypoints)
-
-    def set_status(self, status:str):
-        with self._status_lock:
-            if status == "init":
-                self._status_machine = ArmControllerStatus.Init
-            elif status == "ready":
-                self._status_machine = ArmControllerStatus.Ready
-            elif status == "running":
-                self._status_machine = ArmControllerStatus.Running
-            elif status == "hold_position":
-                self._status_machine = ArmControllerStatus.HoldPosition
-            elif status == "stopped":
-                self._status_machine = ArmControllerStatus.Stopped
-            elif status == "error":
-                self._status_machine = ArmControllerStatus.Error
     
     # ==================== getting ====================
     
@@ -378,24 +424,7 @@ class ArmController(BaseController):
                 return "unknown"
     
     # ===================== judge =======================
-    def judge_current_status(self,status:str) -> bool:
-        with self._status_lock:
-            if status == "init":
-                return True
-            elif status == "ready":
-                return True
-            elif status == "running":
-                return True
-            elif status == "hold_position":
-                return True
-            elif status == "stopped":
-                return True
-            elif status == "error":
-                return True
-            elif status == "exit":
-                return True
-            else:
-                return False
+
     
     # ==================== send =======================
     def send_view_data(self,target_position):
@@ -430,7 +459,8 @@ class ArmController(BaseController):
             data[f"{device_key}/ssid"] = self.device.get_my_session_id()
             data[f"{device_key}/hold_ssid"] = self.device.get_session_holder()
 
-            senders.send_json(data)
+            senders.add_data(data)
+            # senders.send_json(data)
     
     # ==================== task ====================
 
@@ -452,62 +482,8 @@ class ArmController(BaseController):
                     target_position)
                 
                 # ============== judge status machine ==============
-            
-                if self.judge_current_status("init"):
-                    pass
-                elif self.judge_current_status("ready"):
-                    
-                    """
-                    从 ready 到 running 的条件：
-                    - 接到home命令，或者 play命令
-                    
-                    ready 状态下的行为：
-                    - 等待命令
-                    - 状态更新
-                    """
-                    pass
-                elif self.judge_current_status("running"):
-                    """
-                    从 running 到 hold_position 的条件：
-                    - 接到 hold_position 命令
-                    从 running 到 ready 的条件：
-                    - 完成home
-                    - 完成单次轨迹
-                    从 running 到 stopped 的条件：
-                    - 接到 stop 命令
-                    从 running 到 error 的条件：
-                    - 设备异常
-                    
-                    running 状态下的行为：
-                    - 持续执行轨迹
-                    - 状态更新
-                    """
-                    pass
-                elif self.judge_current_status("hold_position"):
-                    """
-                    从 hold_position 到 running 的条件：
-                    - 接到 恢复 命令
-                    
-                    """
-                    pass
-                elif self.judge_current_status("stopped"):
-                    """
-                    从 stopped 到 exit：
-                    - home 完成
-                    
-                    stoped 状态下的行为：
-                    - 等待 home 完成
-                    
-                    """
-                    
-                    pass
-                elif self.judge_current_status("error"):
-                    """
-                    从 error 到 stop：
-                    - 接到 stop 命令
-                    
-                    """
-                    pass
+                
+                
                 
                 # ============= print logger ===========
 
@@ -520,7 +496,7 @@ class ArmController(BaseController):
             except Exception as e:
                 print(f"[Device {self._device_id}] threading Exception: {e}")
                 traceback.print_exc()
-                self.update_status("error",f"{e}")
+                # self.update_status("error",f"{e}")
                 # 设置状态机
                 
             # finally:

@@ -35,7 +35,7 @@ class ArmCoordinator(BaseCoordinator):
     
     def start(self, device_ws_url_list, enable_kcp, arm_config):
         
-        # senders.start()
+        senders.start()
         
         if device_ws_url_list is None:
             print("device ip list is None")
@@ -90,7 +90,7 @@ class ArmCoordinator(BaseCoordinator):
     
     
     def shutdown(self):
-        # senders.stop()
+        senders.stop()
         
         # from threading to stop controllers
         crl_shutdown_queue = deque()
