@@ -7,16 +7,6 @@ from queue import Queue
 
 from enum import Enum
 
-class ControllerStatus(Enum):
-    DISCONNETED = 0
-    INIT = 1
-    READY = 2
-    RUNNING = 3
-    HOLD = 4
-    SHOP = 5
-    ERROR = 6
-    
-
 # 继承ABC类
 class BaseController(ABC):
     
@@ -37,18 +27,12 @@ class BaseController(ABC):
         # data 
         self.controll_info = {}
         self.device_info = {}
-        # self._cmd_queue = Queue()
+        self._status_callback = None
         
-        # self.status = ControllerStatus.Disconnected
-        # self._send_barrier:Optional[threading.Barrier] = None
-        # self._complete_action_barrier:Optional[threading.Barrier] = None
-        # self._send_condition = threading.Condition()
-        
-        # if self._device_id == 0:
-        #     raise ValueError("device_id must be greater than 0")
-        
-        
-        
+        # status
+        self._current_cmd = None
+        self._view = False
+
     
     # @abstractmethod
     # def connect(self):
@@ -62,41 +46,51 @@ class BaseController(ABC):
     def shutdown(self):
         pass
     
-    # @abstractmethod
-    # def send_command(self) -> bool:
-    #     pass
-    
-    # def set_barrier(self, barrier: threading.Barrier, complete_action_barrier: threading.Barrier):
-    #     self._send_barrier = barrier
-    #     self._complete_action_barrier = complete_action_barrier
-
-    
-    # def set_condition(self, condition: threading.Condition):
-    #     self._send_condition = condition
-    
-    # @abstractmethod
-    # def get_info(self):
-    #     pass
-    
+    # ==================== send =======================
     @abstractmethod
-    def get_thread_is_alive(self):
+    def send_view_data(self):
         pass
     
-    @abstractmethod
-    def get_status(self):
-        pass
+    # ============= setting ===============
+    def set_current_cmd(self, cmd:Optional[str]):
+        with self._data_lock:
+            self._current_cmd = cmd
+    
+    def set_status_callback(self, callback):
+        with self._status_lock:
+            self._status_callback = callback
+    
+    def update_status(self, new_status:str, reason:str):
+        with self._status_lock:
+            old_status = self._current_status
+            # self._current_status = new_status
+            if old_status != new_status:
+                self._current_status = new_status
+        if self._status_callback is not None:
+            self._status_callback(
+                self._device_id, 
+                new_status,
+        )
+                    
+    def set_view(self, view:bool):
+        with self._status_lock:
+            self._view = view
     
     def get_device_id(self):
         with self._status_lock:
             return self._device_id
-        
-    def get_controll_info(self):
-        with self._status_lock:
-            return self.controll_info
     
     def get_device_info(self):
         with self._status_lock:
             return self.device_info
+    
+    # ============== judging ==============
+    def judge_cmd(self, cmd:str) -> bool:
+        with self._data_lock:
+            if self._current_cmd == cmd:
+                return True
+            else:
+                return False
     
     @abstractmethod
     def _task_loop(self):

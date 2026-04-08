@@ -54,33 +54,26 @@ class ArmCoordinator(BaseCoordinator):
         
         # event init
         print(f"controllers {len(self._controllers_list)}")
-        # self._send_barrier = threading.Barrier(len(self._controllers_list)+1)
-        # self._complete_action_barrier = threading.Barrier(len(self._controllers_list)+1)
-        
+
         # setting controllers
         for controller in self._controllers_list:
             controller.set_arm_config(arm_config)
             controller.set_waypoints(self._waypoints)
             controller.set_view(self._enable_view)
+            controller.set_status_callback(self._controller_status_changed)
             
-            
-        
         # # controllers start
         res_crl_start = [False] * len(device_ws_url_list)
         crl_connet_queue = deque()
         
         def connect_wrapper(idx, controller):
           res_crl_start[idx] = controller.start()
-          
-        
-        s =time.time()
         
         for idx, controller in enumerate(self._controllers_list):
             t = threading.Thread(target=connect_wrapper, args=(idx, controller))
             t.start()
             crl_connet_queue.append(t)
         
-        print(f"controllers start time: {time.time() - s}")
         for t in crl_connet_queue:
             t.join()
         
@@ -131,49 +124,33 @@ class ArmCoordinator(BaseCoordinator):
     
     def _task_loop(self):
         
-        cmd = None
         while not self._stop_event.is_set(): # condition: controllers are running
             
-            # if self.cmd_queue.empty():
-            cmd = self.cmd_queue.get()
-            
-            if cmd:
-                
-                with self.controller_lock:
-                    for controller in self._controllers_list:
-                        isok = controller.put_command(cmd)
-                        if isok == False:
-                            print(f"[Coordinator] device {controller.get_device_id()} put command failed")
-                
-                # wait for controllers to finish
-                # if self._send_barrier:
-                #     self._send_barrier.wait()
-                #     print("======================= all controllers execute command ============================")
-                
-                # for controller in self._controllers_list:
-                #     is_ok = controller.send_command(cmd)
-                #     if not is_ok:
-                #         print(f"[Coordinator] device {controller.get_device_id()} send command failed")
-                    
-                # wait for controllers to finish
-                # if self._complete_action_barrier:
-                #     self._complete_action_barrier.wait()
-                #     print("======================= all controllers complete action ============================")
-                
-            # time.sleep(0.001)
-
-            # judge status and update status machine. 判断状态并决定是否进行下一次的机械臂变换
+            pass
         
     # ============ command ==============
     def publish_command(self,cmd:Optional[str] = None):
         try:
-            # self._message_bus.publish("Arm_command", cmd)
-            
             for controller in self._controllers_list:
                 controller.set_current_cmd(cmd)
             
         except Exception as e:
             print(e)
+    
+    # ============ callback ==============
+    def _controller_status_changed(self, controller_id:int, new_status:str,reason:str):
+        controllerKey = f"controller{controller_id}"
+        with self._status_lock:
+            if self._status_cache is None:
+                self._status_cache = {}
+                
+            # judge dict
+            if controllerKey not in self._status_cache:
+                self._status_cache[controllerKey] = {}
+            info = self._status_cache[controllerKey]
+            info["status"] = new_status
+            info["reason"] = reason
+            info["timestamp"] = time.time()
     
     def all_brake_command(self):
         pass

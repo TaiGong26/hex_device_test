@@ -21,16 +21,12 @@ class CoordinatorStatus:
 
 class BaseCoordinator(ABC):
     def __init__(self):
-        # self._async_loop = None
-        # self._device_ws_url_list = _device_ws_url_list
-        
         self._stop_event = threading.Event()
         self.controller_lock = threading.Lock()
-        # self._send_barrier:Optional[threading.Barrier] = None
-        # self._complete_action_barrier:Optional[threading.Barrier] = None
         self._send_condition = threading.Condition()
         
         self._controllers_list = deque()
+        self._status_cache = {}
         
         self._state_machine = CoordinatorStatus.NoneStatus
         
@@ -45,9 +41,6 @@ class BaseCoordinator(ABC):
     def shutdown(self):
         pass
 
-    @abstractmethod
-    def publish_command(self):
-        pass
     
     def set_status(self, new_status:str):
         with self._status_lock:
@@ -67,3 +60,20 @@ class BaseCoordinator(ABC):
             else:
                 print(f"invalid status: {new_status}")
                 return None
+            
+    # ==================== status update ==================== 
+    
+    @abstractmethod
+    def publish_command(self):
+        pass
+    
+    # @abstractmethod
+    def _controller_status_changed(
+        self, 
+        controller_id:int, 
+        new_status:str,
+        reason:str
+    ):
+        pass
+            
+            

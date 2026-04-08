@@ -205,8 +205,7 @@ class ArmController(BaseController):
         self.robot_type = None
         self._arm_config = None
         self._waypoints = None
-        self._current_cmd = None
-        self._view = False
+        self._loop_running = False
         
         self.trajectory_player: Optional[TrajectoryPlanner] = None
         self.loop_count = 0
@@ -222,18 +221,6 @@ class ArmController(BaseController):
         self._status_machine = ArmControllerStatus.Disconnected
         
         self.__HOME_POSITION = tuple([0.0, -1.5, 3.00, 0.0, 0.0, 0.0])
-        
-        # self._controll_info = {
-        #     "trajectory_started": False,
-        #     "current_waypoint_index": 0,
-        #     "last_target_position": None,
-        #     "status" : None,
-        #     "current_cmd": None,
-        #     "loop_count": 0,
-        # }
-        
-    # def connect(self):
-    #     pass
     
     def start(self,timeout:int=3) -> bool:
         
@@ -310,6 +297,7 @@ class ArmController(BaseController):
                 time.sleep(0.1)
                 print(f"[Device {self._device_id}] waiting for session hold:  myssid:{ssid} holdssid:{hold_ssid}")
             
+            self._loop_running = True
 
             self._task_thread = threading.Thread(target=self._task_loop,daemon=True)
             self._task_thread.start()
@@ -343,7 +331,6 @@ class ArmController(BaseController):
             print(f"[Device {self._device_id}, Exception]: {e}")
         
     # ==================== setting ====================
-    
     def set_arm_config(self, arm_config:dict):
         self._arm_config = arm_config
         with self._data_lock:
@@ -354,10 +341,6 @@ class ArmController(BaseController):
         with self._data_lock:
             self._waypoints = copy.deepcopy(waypoints)
 
-    def set_current_cmd(self, cmd:Optional[str]):
-        with self._data_lock:
-            self._current_cmd = cmd
-            
     def set_status(self, status:str):
         with self._status_lock:
             if status == "init":
@@ -373,15 +356,7 @@ class ArmController(BaseController):
             elif status == "error":
                 self._status_machine = ArmControllerStatus.Error
     
-    def set_view(self, view:bool):
-        with self._status_lock:
-            self._view = view
     # ==================== getting ====================
-    def get_status(self):
-        pass
-    
-    def get_thread_is_alive(self):
-        pass
     
     def get_current_status(self):
         with self._status_lock:
@@ -418,13 +393,6 @@ class ArmController(BaseController):
             elif status == "error":
                 return True
             elif status == "exit":
-                return True
-            else:
-                return False
-    
-    def judge_cmd(self, cmd:str) -> bool:
-        with self._data_lock:
-            if self._current_cmd == cmd:
                 return True
             else:
                 return False
@@ -468,17 +436,8 @@ class ArmController(BaseController):
 
     def _task_loop(self):
         task_loop_hz = 1 / self._task_loop_hz
-        # task_check_cnt = 0
-        # print(f"[Device {self._device_id}] task loop start time: {self._start_time - time.time()}")
-        if self.device.get_session_holder() != self.device.get_my_session_id():
-            print(f"[Device {self._device_id}] myssid:{self.device.get_my_session_id()} holdssid:{self.device.get_session_holder()}")
-        
-        while not self.judge_current_status("ready"):
-            time.sleep(0.1)
-        self.set_status("running")
-        
-        
-        while True: # what is the condition: hex_device_api is running
+
+        while self._loop_running: # what is the condition: hex_device_api is running
             try:
                 
                 # =========== get target position ===========
@@ -487,12 +446,6 @@ class ArmController(BaseController):
                     target_position = self.trajectory_player.get_current_target().tolist()
                 
                 # ============ send command to device ============
-                # if self.judge_current_status("running") and target_position is not None:
-                    # self.device.motor_command(
-                    #     CommandType.POSITION,
-                    #     target_position)
-                
-                    # self.send_view_data(target_position)
                 
                 self.device.motor_command(
                     CommandType.POSITION,
@@ -535,8 +488,6 @@ class ArmController(BaseController):
                     从 hold_position 到 running 的条件：
                     - 接到 恢复 命令
                     
-                    
-                    
                     """
                     pass
                 elif self.judge_current_status("stopped"):
@@ -558,11 +509,8 @@ class ArmController(BaseController):
                     """
                     pass
                 
-                
-                
                 # ============= print logger ===========
 
-                
                 # ============= update =============
                 time.sleep(task_loop_hz)
                 self.send_view_data(target_position)
@@ -572,8 +520,9 @@ class ArmController(BaseController):
             except Exception as e:
                 print(f"[Device {self._device_id}] threading Exception: {e}")
                 traceback.print_exc()
-            except BrokenBarrierError as e:
-                print(f"[Device {self._device_id}] Waring Barrier broken")
+                self.update_status("error",f"{e}")
+                # 设置状态机
+                
             # finally:
             #     print(f"[Device {self._device_id}] finally:  threading exit..")
             
