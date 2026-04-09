@@ -5,18 +5,18 @@ import threading
 from collections import deque
 from dataclasses import dataclass
 from queue import Queue
+from enum import Enum
+
 
 
 # 控制器状态机
-@dataclass
-class CoordinatorStatus:
-    NoneStatus = 0
+class CoordinatorStatus(Enum):
+    Disconnected = 0
     Init = 1
     Ready = 2
     Running = 3
     Stopped = 4
     Error = 5
-    Exit = 6       
 
 
 class BaseCoordinator(ABC):
@@ -28,7 +28,7 @@ class BaseCoordinator(ABC):
         self._controllers_list = deque()
         self._status_cache = {}
         
-        self._state_machine = CoordinatorStatus.NoneStatus
+        self._state_machine = CoordinatorStatus.Disconnected
         
         # lock 
         self._status_lock = threading.Lock()
@@ -71,9 +71,12 @@ class BaseCoordinator(ABC):
     def _controller_status_changed(
         self, 
         controller_id:int, 
-        new_status:str,
-        reason:str
+        new_status:dict,
     ):
-        pass
+        with self._status_lock:
+            if controller_id not in self._status_cache:
+                self._status_cache[controller_id] = {}
+            self._status_cache[controller_id] = new_status
+            
             
             

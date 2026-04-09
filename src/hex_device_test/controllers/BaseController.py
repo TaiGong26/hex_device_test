@@ -25,8 +25,8 @@ class BaseController(ABC):
         self._data_lock = threading.Lock()
 
         # data 
-        self.controll_info = {}
-        self.device_info = {}
+        self.controll_status = {}
+        self.device_status = {}
         self._status_callback = None
         
         # status
@@ -57,21 +57,14 @@ class BaseController(ABC):
             self._current_cmd = cmd
     
     def set_status_callback(self, callback):
-        with self._status_lock:
-            self._status_callback = callback
+        self._status_callback = callback
     
-    def update_status(self, new_status:str, reason:str):
-        with self._status_lock:
-            old_status = self._current_status
-            # self._current_status = new_status
-            if old_status != new_status:
-                self._current_status = new_status
+    def update_status(self, new_status:dict):
         if self._status_callback is not None:
             self._status_callback(
                 self._device_id, 
                 new_status,
         )
-                    
     def set_view(self, view:bool):
         with self._status_lock:
             self._view = view

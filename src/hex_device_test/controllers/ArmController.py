@@ -6,15 +6,18 @@ from dataclasses import dataclass
 import numpy as np
 import traceback
 import copy
-
+from enum import Enum
+from collections import deque
 
 from hex_device import HexDeviceApi
 from hex_device import Arm, CommandType, Hands
 from ..tools.plotjuggle import senders
 
 from .BaseController import BaseController
-# from hex_device_testDemo.managers.Coordinator import Coordinator
 
+from .TrajectoryController import TrajectoryController
+from .TrajectoryController import TrajectoryPlanner
+# from hex_device_testDemo.managers.Coordinator import Coordinator
 
 
 """
@@ -26,275 +29,54 @@ from .BaseController import BaseController
  - HoldPosition
  - Stopped
  - Error
+ - LostSession
  - Exit
 
 """
 
-class ArmControllerStatus:
+class ArmControllerStatus(Enum):
     Disconnected = 0
     Init = 1
     Ready = 2
     Running = 3
-    HoldPosition = 4
+    Brake = 4
     Stopped = 5
     Exit = 6
-    Error = 7
-
-
-class TrajectoryController:
-    def __init__(self):
-        pass
-    
-    def get_target_position(self,current_position):
-        # 传递当前位姿，计算下一时刻的目标位姿；可以选择不传递，由控制器自己维护状态
-        pass
-    
-    def startController(self):
-        pass
-    
-    # def set_current_position(self, position):
-    #     pass
-    
-    # 平滑
-    def _smooth_step(self, t):
-        """S-curve interpolation function that provides smooth acceleration and deceleration"""
-        # Limit t to [0,1] range
-        t = max(0.0, min(1.0, t))
-        
-        # Use 5th degree polynomial for smoother interpolation: 6t⁵ - 15t⁴ + 10t³
-        return 6 * t**5 - 15 * t**4 + 10 * t**3
-
-class TrajectoryPlanner:
-    """Trajectory planner that supports smooth acceleration and deceleration planning"""
-    
-    def __init__(self, waypoints, segment_duration=3.0):
-        """
-        Initialize trajectory planner
-        waypoints: List of waypoints
-        segment_duration: Duration of each trajectory segment (seconds)
-        """
-        self.waypoints = waypoints
-        self.segment_duration = segment_duration
-        
-        self.current_waypoint_index = 0
-        self.trajectory_started = False
-        self.start_time = None
-        self.last_target_position = None  # Store last commanded position
-        
-    def start_trajectory(self):
-        """Start trajectory execution"""
-        if not self.waypoints:
-            return False
-            
-        self.trajectory_started = True
-        self.start_time = time.time()
-        self.current_waypoint_index = 0
-        return True
-        
-    def get_current_target(self):
-        """Get the target position at the current moment"""
-        if not self.trajectory_started or not self.waypoints:
-            return None
-            
-        current_time = time.time()
-        elapsed_time = current_time - self.start_time
-        
-        total_segments = len(self.waypoints)
-        segment_index = int(elapsed_time / self.segment_duration) % total_segments
-        
-        segment_elapsed = elapsed_time % self.segment_duration
-        normalized_time = segment_elapsed / self.segment_duration
-        
-        start_waypoint = self.waypoints[segment_index]
-        end_waypoint = self.waypoints[(segment_index + 1) % total_segments]
-        
-        # Use S-curve interpolation to calculate current position
-        s = self._smooth_step(normalized_time)
-        
-        start_pos = np.array(start_waypoint)
-        end_pos = np.array(end_waypoint)
-        target_position = start_pos + s * (end_pos - start_pos)
-        
-        self.current_waypoint_index = segment_index
-        self.last_target_position = target_position  # Store for potential return home
-        
-        return target_position
-    
-    def get_last_position(self):
-        """Get the last commanded position"""
-        return self.last_target_position
-        
-    def _smooth_step(self, t):
-        """S-curve interpolation function that provides smooth acceleration and deceleration"""
-        # Limit t to [0,1] range
-        t = max(0.0, min(1.0, t))
-        
-        # Use 5th degree polynomial for smoother interpolation: 6t⁵ - 15t⁴ + 10t³
-        return 6 * t**5 - 15 * t**4 + 10 * t**3
-        
-    def get_current_segment_info(self):
-        """Get information about the current segment"""
-        if not self.trajectory_started:
-            return None
-            
-        current_time = time.time()
-        elapsed_time = current_time - self.start_time
-        
-        segment_index = int(elapsed_time / self.segment_duration) % len(self.waypoints)
-        segment_elapsed = elapsed_time % self.segment_duration
-        segment_progress = segment_elapsed / self.segment_duration
-        
-        return {
-            'segment_index': segment_index,
-            'segment_progress': segment_progress,
-            'total_elapsed': elapsed_time
-        }
-
-
-class ReturnHomeController:
-    """Controller for smooth return to home position"""
-    
-    def __init__(self, start_position, home_position, duration):
-        """
-        Initialize return home controller
-        start_position: Starting position (current position when Ctrl+C is pressed)
-        home_position: Target home position
-        duration: Duration to reach home position (seconds)
-        """
-        self.start_position = np.array(start_position)
-        self.home_position = np.array(home_position)
-        self.duration = duration
-        self.start_time = time.time()
-        
-    def get_target_position(self):
-        """Get the current target position during return home"""
-        current_time = time.time()
-        elapsed_time = current_time - self.start_time
-        
-        if elapsed_time >= self.duration:
-            return self.home_position, True  # Reached home
-        
-        # Calculate normalized time [0, 1]
-        t = elapsed_time / self.duration
-        
-        # Use S-curve interpolation for smooth motion
-        s = self._smooth_step(t)
-        
-        # Interpolate between start and home position
-        target_position = self.start_position + s * (self.home_position - self.start_position)
-        
-        return target_position, False  # Not yet reached home
-    
-    def _smooth_step(self, t):
-        """S-curve interpolation function"""
-        t = max(0.0, min(1.0, t))
-        return 6 * t**5 - 15 * t**4 + 10 * t**3
-
 
 class ArmController(BaseController):
-    
-    # 状态转移邻接表
-    """
-    init 转移
-    - ready
-    - error
-    - exit
-    
-    ready 可转移：
-    - running
-    - error
-    - stopped
-    
-        从 ready 到 running 的条件：
-        - 接到home命令，或者 play命令
         
-        ready 状态下的行为：
-        - 等待命令
-        - 状态更新
-    
-    running 可转移:
-    - ready
-    - hold_position
-    - stopped
-    - error
-    
-        从 running 到 hold_position 的条件：
-        - 接到 hold_position 命令
-        
-        从 running 到 ready 的条件：
-        - 完成home
-        - 完成单次轨迹
-        
-        从 running 到 stopped 的条件：
-        - 接到 stop 命令
-        从 running 到 error 的条件：
-        - 设备异常
-    
-        running 状态下的行为：
-        - 持续执行轨迹
-        - 状态更新
-        
-    hold_position 可转移:
-    - running
-    - stopped
-    - error
-    
-        从 hold_position 到 running 的条件：
-        - 接到 恢复 命令
-    
-    从 stopped 到 exit：
-    - home 完成
-    
-    stoped 状态下的行为：
-    - 等待 home 完成
-    
-    从 error 到 stop：
-    - 接到 stop 命令
-    
-    """
-    
-    STATE_MAP = {
-        ArmControllerStatus.Ready: [],
-        ArmControllerStatus.Running: [],
-        ArmControllerStatus.HoldPosition: [],
-        ArmControllerStatus.Stopped: [],
-        ArmControllerStatus.Error: [],
-    }
-    
-    
-    
-    
-    
-    
-    def __init__(self, ws_url:str, local_port:int=0, enable_kcp:bool=False, crl_hz:int=500, device_id:int=0,task_loop_hz:int=100):
+    def __init__(self, ws_url:str, local_port:int=0, enable_kcp:bool=False, crl_hz:int=500, device_id:int=0,task_loop_hz:int=20):
         super().__init__(ws_url, local_port, enable_kcp, crl_hz, device_id)
         
+        # device
         self._hex_api = None
         self.device = None
         self.device_optional = None
-        self._task_thread = None
-        # self.status = ArmControllerStatus.Disconnected
-        
-        self._task_loop_hz = task_loop_hz
         self.robot_type = None
         self._arm_config = None
-        self._waypoints = None
-        self._loop_running = False
         
+        # status
+        self._status_machine = ArmControllerStatus.Disconnected
+        
+        #data 
+        self.data_queue = deque(maxlen=50)
+        
+        # Task
+        self._task_loop_hz = task_loop_hz
+        self._loop_running = False
+        self._task_thread = None
+        
+        # trajectory And Home
+        self._waypoints = None
         self.trajectory_player: Optional[TrajectoryPlanner] = None
         self.loop_count = 0
         
-        self._task_thread = None
-        
-        self._home_position = tuple([0.0, -1.5, 3.00, 0.0, 0.0, 0.0])
+        self.__HOME_POSITION = tuple([0.0, -1.5, 3.00, 0.0, 0.0, 0.0])
         self._return_home_duration = 10
         self._return_home = None
         
         self._start_time = None
         
-        self._status_machine = ArmControllerStatus.Disconnected
-        
-        self.__HOME_POSITION = tuple([0.0, -1.5, 3.00, 0.0, 0.0, 0.0])
     
     def start(self,timeout:int=3) -> bool:
         
@@ -334,29 +116,10 @@ class ArmController(BaseController):
                 return False
             self.device.start()
             
-            # self.set_status("init")
-            print(f"[Device {self._device_id}] device session hold")
-            
-            
-            # setting and play Trajectory
-            if self._waypoints:
-                self.trajectory_player = TrajectoryPlanner(
-                    waypoints=self._waypoints,
-                    segment_duration=3.0
-                    )
-            else:
-                print(f"[Device {self._device_id}] Not waypoints !!!!")
-                return False
-            
-            if self.trajectory_player:
-                
-                res = self.trajectory_player.start_trajectory()
-                if res:
-                    print(f"[Device {self._device_id}] trajectory player start ")
-                else:
-                    print(f"[Device {self._device_id}] Not waypoints failed !!!!")
+            if self._status_machine == ArmControllerStatus.Disconnected:
+                self._status_machine = ArmControllerStatus.Init
                     
-            # self._start_time = time.time()
+            self._start_time = time.time()
             
             self._loop_running = True
 
@@ -404,25 +167,6 @@ class ArmController(BaseController):
     
     # ==================== getting ====================
     
-    def get_current_status(self):
-        with self._status_lock:
-            if self._status_machine == ArmControllerStatus.Init:
-                return "init"
-            elif self._status_machine == ArmControllerStatus.Ready:
-                return "ready"
-            elif self._status_machine == ArmControllerStatus.Running:
-                return "running"
-            elif self._status_machine == ArmControllerStatus.HoldPosition:
-                return "hold_position"
-            elif self._status_machine == ArmControllerStatus.Stopped:
-                return "stopped"
-            elif self._status_machine == ArmControllerStatus.Error:
-                return "error"
-            elif self._status_machine == ArmControllerStatus.Exit:
-                return "exit"
-            else:
-                return "unknown"
-    
     # ===================== judge =======================
 
     
@@ -455,41 +199,102 @@ class ArmController(BaseController):
                     data[f"{device_key}/target_position/joint{i}"] = float(v)
 
             # 标量
-            data[f"{device_key}/status"] = self._status_machine
+            data[f"{device_key}/status"] = self._status_machine.value
             data[f"{device_key}/ssid"] = self.device.get_my_session_id()
             data[f"{device_key}/hold_ssid"] = self.device.get_session_holder()
 
             senders.add_data(data)
             # senders.send_json(data)
     
+    def publish_command(self,command_type:str,target_position):
+        with self._data_lock:
+            if command_type == "POSITION":
+                self.data_queue.append((CommandType.POSITION,target_position))
+            if command_type == "BRAKE":
+                self.data_queue.appendleft((CommandType.BRAKE,[0] * self.device.motor_command))
+        
+        # if command_type == "POSITION":
+        #     self.device.motor_command(CommandType.POSITION,target_position)
+        # if command_type == "BRAKE":
+        #     self.device.motor_command(CommandType.BRAKE,[0] * self.device.motor_count)
+            
+    # def update_status(self, new_status, reason):
+        # return super().update_status(new_status, reason)
+    
+    
     # ==================== task ====================
 
     def _task_loop(self):
         task_loop_hz = 1 / self._task_loop_hz
+        target_position = None
 
         while self._loop_running: # what is the condition: hex_device_api is running
             try:
+                # print(f"dev{0}: task loop")
                 
                 # =========== get target position ===========
-                target_position = None
-                if self.trajectory_player:
-                    target_position = self.trajectory_player.get_current_target().tolist()
+                # target_position = None
+                # if self.trajectory_player:
+                #     target_position = self.trajectory_player.get_current_target().tolist()
                 
                 # ============ send command to device ============
                 
-                self.device.motor_command(
-                    CommandType.POSITION,
-                    target_position)
+                # self.device.motor_command(
+                #     CommandType.POSITION,
+                #     target_position)
                 
-                # ============== judge status machine ==============
+                # target_position = 
+                
+                sTime = time.perf_counter()
+                
+                target_data = None
+                with self._data_lock:
+                    if len(self.data_queue) >0:
+                        target_data = self.data_queue.popleft()
+                
+                if target_data:
+                    _type, _target = target_data
+                
+                if target_data:
+                    self.device.motor_command(
+                        _type,
+                        _target
+                    )
+                    self.send_view_data(_target)
+                
+                eTime=time.perf_counter()
+                if eTime - sTime>0.2:
+                    print(f"[dev{self._device_id}] Time out")
+                
+                # ============== status machine ==============
+                
+                if self._status_machine == ArmControllerStatus.Init:
+                    pass
+                
+                elif self._status_machine == ArmControllerStatus.Ready:
+                    pass
+                
+                elif self._status_machine == ArmControllerStatus.Running:
+                    pass
+                
+                elif self._status_machine == ArmControllerStatus.Brake:
+                    pass
+                
+                elif self._status_machine == ArmControllerStatus.Stopped:
+                    pass
+                    
+                elif self._status_machine == ArmControllerStatus.Exit:
+                    pass
+                
+                else:
+                    pass
                 
                 
-                
-                # ============= print logger ===========
+                # ============== check error ================
 
                 # ============= update =============
                 time.sleep(task_loop_hz)
-                self.send_view_data(target_position)
+                # self.send_view_data(target_position)
                     
                     
                     
