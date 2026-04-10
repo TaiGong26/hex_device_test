@@ -26,7 +26,7 @@ class BaseCoordinator(ABC):
         self._send_condition = threading.Condition()
         
         self._controllers_list = deque()
-        self._status_cache = {}
+        self._status_queue = None
         
         self._state_machine = CoordinatorStatus.Disconnected
         
@@ -41,42 +41,9 @@ class BaseCoordinator(ABC):
     def shutdown(self):
         pass
 
-    
-    def set_status(self, new_status:str):
-        with self._status_lock:
-            # self._status = new_status
-            if new_status == "init":
-                self._status = CoordinatorStatus.Init
-            elif new_status == "ready":
-                self._status = CoordinatorStatus.Ready
-            elif new_status == "running":
-                self._status = CoordinatorStatus.Running
-            elif new_status == "stopped":
-                self._status = CoordinatorStatus.Stopped
-            elif new_status == "error":
-                self._status = CoordinatorStatus.Error
-            elif new_status == "exit":
-                self._status = CoordinatorStatus.Exit
-            else:
-                print(f"invalid status: {new_status}")
-                return None
-            
     # ==================== status update ==================== 
     
     @abstractmethod
     def publish_command(self):
         pass
-    
-    # @abstractmethod
-    def _controller_status_changed(
-        self, 
-        controller_id:int, 
-        new_status:dict,
-    ):
-        with self._status_lock:
-            if controller_id not in self._status_cache:
-                self._status_cache[controller_id] = {}
-            self._status_cache[controller_id] = new_status
-            
-            
             

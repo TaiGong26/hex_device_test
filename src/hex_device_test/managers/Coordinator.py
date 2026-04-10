@@ -51,7 +51,7 @@ class ArmCoordinator(BaseCoordinator):
                 ws_url=ip,
                 local_port=0,
                 enable_kcp=enable_kcp,
-                crl_hz=500,
+                task_loop_hz=100,
                 device_id=idx
             )
             self._controllers_list.append(controller)
@@ -64,7 +64,7 @@ class ArmCoordinator(BaseCoordinator):
             controller.set_arm_config(arm_config)
             controller.set_waypoints(self._waypoints)
             controller.set_view(self._enable_view)
-            controller.set_status_callback(self._controller_status_changed)
+            # controller.set_status_callback(self._controller_status_changed)
             
         # # controllers start
         # res_crl_start = [False] * len(device_ws_url_list)

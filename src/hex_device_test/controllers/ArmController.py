@@ -8,6 +8,8 @@ import traceback
 import copy
 from enum import Enum
 from collections import deque
+import multiprocessing as mp
+
 
 from hex_device import HexDeviceApi
 from hex_device import Arm, CommandType, Hands
@@ -15,7 +17,6 @@ from ..tools.plotjuggle import senders
 
 from .BaseController import BaseController
 
-from .TrajectoryController import TrajectoryController
 from .TrajectoryController import TrajectoryPlanner
 # from hex_device_testDemo.managers.Coordinator import Coordinator
 
@@ -42,11 +43,18 @@ class ArmControllerStatus(Enum):
     Brake = 4
     Stopped = 5
     Exit = 6
+    
+class ArmWorkPorcess:
+    def __init__(self):
+        pass
+    
+
+    
 
 class ArmController(BaseController):
         
-    def __init__(self, ws_url:str, local_port:int=0, enable_kcp:bool=False, crl_hz:int=500, device_id:int=0,task_loop_hz:int=20):
-        super().__init__(ws_url, local_port, enable_kcp, crl_hz, device_id)
+    def __init__(self, ws_url:str, local_port:int=0, enable_kcp:bool=False, task_loop_hz:int=100, device_id:int=0):
+        super().__init__(ws_url, local_port, enable_kcp, task_loop_hz, device_id)
         
         # device
         self._hex_api = None
@@ -61,6 +69,10 @@ class ArmController(BaseController):
         #data 
         self.data_queue = deque(maxlen=50)
         
+        # lock
+        self._status_lock = threading.Lock()
+        self._data_lock = threading.Lock()
+
         # Task
         self._task_loop_hz = task_loop_hz
         self._loop_running = False
@@ -81,23 +93,13 @@ class ArmController(BaseController):
     def start(self,timeout:int=3) -> bool:
         
         try: 
-            
-            # creat
             self._hex_api = HexDeviceApi(
                 ws_url=self._ws_url, 
                 local_port=0, 
                 enable_kcp=self._enable_kcp, 
                 )
             
-            # add wait for device list to be updated
-            start_time= time.time()
-            while not self._hex_api.device_list:
-                if time.time() - start_time > timeout:
-                    print(f"[Device {self._device_id}] Timeout waiting for device list")
-                    return False
-                time.sleep(0.05)
-
-            #  find and start device
+            
             for device in self._hex_api.device_list:
                 print(f"[Device {self._device_id}] 发现设备: {device} type: {type(device)} robot_type: {device.robot_type}")
                 if isinstance(device, Arm):
@@ -116,10 +118,6 @@ class ArmController(BaseController):
                 return False
             self.device.start()
             
-            if self._status_machine == ArmControllerStatus.Disconnected:
-                self._status_machine = ArmControllerStatus.Init
-                    
-            self._start_time = time.time()
             
             self._loop_running = True
 
@@ -135,8 +133,6 @@ class ArmController(BaseController):
     
     def shutdown(self):
         try:
-            # wait all home !!!!!
-            
             if self._task_thread:
                 if self._task_thread.is_alive():
                     self._task_thread.join(timeout=0.1)
@@ -168,9 +164,27 @@ class ArmController(BaseController):
     # ==================== getting ====================
     
     # ===================== judge =======================
-
     
     # ==================== send =======================
+    
+    def publish_command(self,command_type:str,target_position):
+        with self._data_lock:
+            if command_type == "POSITION":
+                self.data_queue.append((CommandType.POSITION,target_position))
+            if command_type == "BRAKE":
+                self.data_queue.appendleft((CommandType.BRAKE,[0] * self.device.motor_command))
+        
+        # if command_type == "POSITION":
+        #     self.device.motor_command(CommandType.POSITION,target_position)
+        # if command_type == "BRAKE":
+        #     self.device.motor_command(CommandType.BRAKE,[0] * self.device.motor_count)
+            
+    # def update_status(self, new_status, reason):
+        # return super().update_status(new_status, reason)
+    
+    def update_status(self, new_status):
+        return super().update_status(new_status)
+    
     def send_view_data(self,target_position):
         _view = False
         with self._status_lock:
@@ -199,27 +213,11 @@ class ArmController(BaseController):
                     data[f"{device_key}/target_position/joint{i}"] = float(v)
 
             # 标量
-            data[f"{device_key}/status"] = self._status_machine.value
+            data[f"{device_key}/status"] = self._status_machine
             data[f"{device_key}/ssid"] = self.device.get_my_session_id()
             data[f"{device_key}/hold_ssid"] = self.device.get_session_holder()
 
-            senders.add_data(data)
-            # senders.send_json(data)
-    
-    def publish_command(self,command_type:str,target_position):
-        with self._data_lock:
-            if command_type == "POSITION":
-                self.data_queue.append((CommandType.POSITION,target_position))
-            if command_type == "BRAKE":
-                self.data_queue.appendleft((CommandType.BRAKE,[0] * self.device.motor_command))
-        
-        # if command_type == "POSITION":
-        #     self.device.motor_command(CommandType.POSITION,target_position)
-        # if command_type == "BRAKE":
-        #     self.device.motor_command(CommandType.BRAKE,[0] * self.device.motor_count)
-            
-    # def update_status(self, new_status, reason):
-        # return super().update_status(new_status, reason)
+            senders.send_json(data)
     
     
     # ==================== task ====================
@@ -230,20 +228,10 @@ class ArmController(BaseController):
 
         while self._loop_running: # what is the condition: hex_device_api is running
             try:
-                # print(f"dev{0}: task loop")
                 
                 # =========== get target position ===========
-                # target_position = None
-                # if self.trajectory_player:
-                #     target_position = self.trajectory_player.get_current_target().tolist()
                 
-                # ============ send command to device ============
-                
-                # self.device.motor_command(
-                #     CommandType.POSITION,
-                #     target_position)
-                
-                # target_position = 
+                # =========== send command to device ========
                 
                 sTime = time.perf_counter()
                 
@@ -261,6 +249,8 @@ class ArmController(BaseController):
                         _target
                     )
                     self.send_view_data(_target)
+                    
+                print(f"[dev{self._device_id}]:{self.data_queue}")
                 
                 eTime=time.perf_counter()
                 if eTime - sTime>0.2:
@@ -268,33 +258,11 @@ class ArmController(BaseController):
                 
                 # ============== status machine ==============
                 
-                if self._status_machine == ArmControllerStatus.Init:
-                    pass
-                
-                elif self._status_machine == ArmControllerStatus.Ready:
-                    pass
-                
-                elif self._status_machine == ArmControllerStatus.Running:
-                    pass
-                
-                elif self._status_machine == ArmControllerStatus.Brake:
-                    pass
-                
-                elif self._status_machine == ArmControllerStatus.Stopped:
-                    pass
-                    
-                elif self._status_machine == ArmControllerStatus.Exit:
-                    pass
-                
-                else:
-                    pass
-                
-                
                 # ============== check error ================
 
                 # ============= update =============
                 time.sleep(task_loop_hz)
-                # self.send_view_data(target_position)
+                self.send_view_data(target_position)
                     
                     
                     

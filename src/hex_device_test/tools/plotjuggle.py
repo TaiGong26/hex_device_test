@@ -1,6 +1,5 @@
 import argparse
 import socket
-import math
 import json
 from ipaddress import ip_address
 import threading

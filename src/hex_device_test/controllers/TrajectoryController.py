@@ -9,60 +9,6 @@ class TrajectoryStatus(Enum):
     Return_Home     = 2 
     Finished        = 3
 
-
-class TrajectoryController:
-    def __init__(
-        self,
-        waypoints,
-        HOMEPOSITION,
-        segment_duration,
-        return_home_duration
-    ):
-        pass
-    
-    # setting
-    def set_move_home(self):
-        pass
-    
-    def set_start_Trajectory(self):
-        pass
-    
-    def get_target_position(self,current_position):
-        # 传递当前位姿，计算下一时刻的目标位姿；可以选择不传递，由控制器自己维护状态
-        current_time = time.time()
-        elapsed_time = current_time - self.start_time
-
-        
-        
-        # Use S-curve interpolation to calculate current position
-        # s = self._smooth_step(normalized_time)
-        
-        # start_pos = np.array(start_waypoint)
-        # end_pos = np.array(end_waypoint)
-        # target_position = start_pos + s * (end_pos - start_pos)
-        
-        # self.current_waypoint_index = segment_index
-        # self.last_target_position = target_position  # Store for potential return home
-        
-        return target_position
-        
-        
-    def startController(self):
-        pass
-    
-    
-    # def set_current_position(self, position):
-    #     pass
-    
-    # 平滑
-    def _smooth_step(self, t):
-        """S-curve interpolation function that provides smooth acceleration and deceleration"""
-        # Limit t to [0,1] range
-        t = max(0.0, min(1.0, t))
-        
-        # Use 5th degree polynomial for smoother interpolation: 6t⁵ - 15t⁴ + 10t³
-        return 6 * t**5 - 15 * t**4 + 10 * t**3
-
 class TrajectoryPlanner:
     """Trajectory planner that supports smooth acceleration and deceleration planning"""
     
@@ -148,7 +94,6 @@ class TrajectoryPlanner:
             'segment_progress': segment_progress,
             'total_elapsed': elapsed_time
         }
-
 
 class ReturnHomeController:
     """Controller for smooth return to home position"""
