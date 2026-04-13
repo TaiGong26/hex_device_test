@@ -8,8 +8,8 @@ import sys
 
 from dataclasses import dataclass
 
-from hex_device_test.managers.Coordinator import ArmCoordinator
-# from hex_device_test.managers.CoordinatorProcess import ArmCoordinator
+# from hex_device_test.managers.Coordinator import ArmCoordinator
+from hex_device_test.managers.CoordinatorProcess import ArmCoordinator
 
 # clean up
 def cleanup(coordinator):
