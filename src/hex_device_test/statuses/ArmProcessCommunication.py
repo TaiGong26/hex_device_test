@@ -2,10 +2,10 @@ import multiprocessing
 from multiprocessing import Manager
 from typing import Dict,Optional
 
-from ..statuses.ArmStatus import ArmErrorStatus,ArmCmdStatus,ArmControllerStatus
+from .ArmStatus import ArmErrorStatus,ArmCmdStatus,ArmControllerStatus
 
 
-class ArmProcessCommunication:
+class ArmCommChannel:
     
     def __init__(self):
         """single device struct"""
@@ -16,27 +16,29 @@ class ArmProcessCommunication:
         # cmd做修改，通过pipe发，共享内存读 
         self.cmd_status = multiprocessing.Value("i",0)
         
+        self.cmd_send_pipe,self.cmd_recv_pipe = multiprocessing.Pipe(duplex=False)
+        
         self.manager = Manager()
         
     def cleanup(self):
         if hasattr(self,"manager"):
             self.manager.shutdown()
             
-class ArmProcessCommunicationManager:
+class ArmCommChannelManager:
     def __init__(self):
         # pass
-        self._shared_memories: Dict[int,ArmProcessCommunication] = {}
+        self._shared_memories: Dict[int,ArmCommChannel] = {}
     
-    def creat_shared_memory(self,id):
+    def create_shared_memory(self,id):
         if id not in self._shared_memories:
-            shm = ArmProcessCommunication()
+            shm = ArmCommChannel()
             self._shared_memories[id] = shm
     
-    def get_shared_memory(self, device_id: int) -> ArmProcessCommunication:
+    def get_shared_memory(self, device_id: int) -> ArmCommChannel:
         """获取指定设备的共享内存"""
         return self._shared_memories.get(device_id)
     
-    def get_all_shared_memories(self) -> Dict[int, ArmProcessCommunication]:
+    def get_all_shared_memories(self) -> Dict[int, ArmCommChannel]:
         """获取所有设备的共享内存"""
         return self._shared_memories.copy()
     
@@ -52,4 +54,4 @@ class ArmProcessCommunicationManager:
             shm.cleanup()
         self._shared_memories.clear()
         
-    def all_pipe_
+    # def all_pipe_

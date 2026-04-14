@@ -30,7 +30,7 @@ class TrajectoryPlanner:
         """Start trajectory execution"""
         if not self.waypoints:
             return False
-            
+        
         self.trajectory_started = True
         self.start_time = time.time()
         self.current_waypoint_index = 0

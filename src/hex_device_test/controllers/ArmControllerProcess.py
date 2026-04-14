@@ -16,7 +16,7 @@ from ..tools.CsvLogger import CsvLogger
 from .BaseController import BaseController
 from .TrajectoryController import TrajectoryPlanner
 
-from ..statuses.SharedMemory import ArmProcessCommunication
+from ..statuses.ArmProcessCommunication import ArmCommChannel
 from ..statuses.ArmStatus import ArmControllerProcessStateMachine,ArmControllerStatus,ArmErrorStatus
 
 
@@ -28,9 +28,9 @@ class ArmStatusTracker:
     - 电机温度
     """
     
-    def __init__(self, device_id: int, shared_memory: ArmProcessCommunication):
+    def __init__(self, device_id: int, arm_ipc: ArmCommChannel):
         self.device_id = device_id
-        self._shm = shared_memory
+        self._ipc = arm_ipc
         self._runtime_start = time.time()
         self._error_history: Dict[str, str] = {}
         self._max_temps = [0.0] * 6
@@ -39,12 +39,12 @@ class ArmStatusTracker:
         """更新状态表"""
         # 更新运行时间
         runtime = time.time() - self._runtime_start
-        self._shm.runtime_seconds.value = runtime
+        self._ipc.runtime_seconds.value = runtime
         
         # 更新电机温度
         temps = device.get_temperatures() if hasattr(device, 'get_temperatures') else [0.0] * 6
         for i, temp in enumerate(temps[:6]):
-            self._shm.motor_temps[i] = temp
+            self._ipc.motor_temps[i] = temp
             self._max_temps[i] = max(self._max_temps[i], temp)
     
     def record_error(self, error_code: str, detail: str) -> None:
@@ -56,7 +56,7 @@ class ArmStatusTracker:
         """生成状态摘要"""
         return {
             'device_id': self.device_id,
-            'runtime_seconds': self._shm.runtime_seconds.value,
+            'runtime_seconds': self._ipc.runtime_seconds.value,
             'max_temperatures': self._max_temps.copy(),
             'error_count': len(self._error_history),
             'errors': self._error_history.copy()
@@ -84,7 +84,7 @@ class ArmControllerMp(BaseController):
         
         
         # 共享内存引用（由协调器传入）
-        self._shared_memory: Optional[ArmProcessCommunication] = None
+        self._arm_ipc: Optional[ArmCommChannel] = None
         
         # 状态机
         # self._state_machine: Optional[ArmControllerProcessStateMachine] = None
@@ -116,7 +116,7 @@ class ArmControllerMp(BaseController):
                 self._loop_running,
                 self._task_loop_hz,
                 self._waypoints,
-                self._shared_memory
+                self._arm_ipc
             ))
             self._task_process.start()
 
@@ -156,8 +156,8 @@ class ArmControllerMp(BaseController):
     def set_view(self, view):
         self._view = view
     
-    def set_shared_memory(self,shm):
-        self._shared_memory = shm
+    def set_arm_ipc(self,ipc):
+        self._arm_ipc = ipc
     
     
     # ==================== getting ====================
@@ -333,8 +333,6 @@ class ArmControllerMp(BaseController):
     #     hex_api.close()
     #     # print(f"[dev{device_id}]: close Process")
         
-    
-    
     def _task_loop(self, 
         ws_url, 
         enable_kcp, 
@@ -343,13 +341,13 @@ class ArmControllerMp(BaseController):
         loop_running, 
         task_hz, 
         waypoints, 
-        shared_memory):
+        arm_ipc:ArmCommChannel):
         """
         子进程主循环
         """
         # 初始化组件
-        state_machine = ArmControllerProcessStateMachine(shared_memory)
-        status_tracker = ArmStatusTracker(device_id, shared_memory)
+        state_machine = ArmControllerProcessStateMachine(arm_ipc)
+        status_tracker = ArmStatusTracker(device_id, arm_ipc)
         csv_logger = CsvLogger(device_id)
         sender = PlotjuggleDraw()
         
@@ -369,10 +367,10 @@ class ArmControllerMp(BaseController):
         
         is_view = view
         target_pos = None
-        
+        motor_pos = None
         
         try:
-            while loop_running.is_set() == False:
+            while not loop_running.is_set():
                 try:
                     
                     if device is None:
@@ -393,9 +391,15 @@ class ArmControllerMp(BaseController):
                     status_tracker.update(device)
                     
                     # 获取当前目标位置
-                    target_pos = trajectory.get_current_target().tolist() if trajectory else [0.0] * 6
-                    motor_pos = device.get_motor_positions() or [0.0] * 6
-                    temps = [shared_memory.motor_temps[i] for i in range(6)]
+                    target_pos = trajectory.get_current_target()
+                    motor_pos = device.get_motor_positions() 
+                    last_pos = trajectory.get_last_position()
+                    # temps = [arm_ipc.motor_temps[i] for i in range(6)]
+                    
+                    # 判断pipe是否有命令可读，然后更新命令
+                    if arm_ipc.cmd_recv_pipe.poll(timeout=0.01):
+                        value = arm_ipc.cmd_recv_pipe.recv()
+                        arm_ipc.cmd_status.value = value
                     
                     # 状态机处理
                     current_state = state_machine.get_state()
@@ -405,12 +409,13 @@ class ArmControllerMp(BaseController):
                         
                     elif current_state == ArmControllerStatus.Ready:
                         state_machine.handle_ready()
+                        trajectory.start_trajectory()
                         
                     elif current_state == ArmControllerStatus.Running:
-                        state_machine.handle_running(device, trajectory)
+                        state_machine.handle_running(device, target_pos)
                         
                     elif current_state == ArmControllerStatus.Stopped:
-                        state_machine.handle_stopped(device)
+                        state_machine.handle_stopped(device,last_pos)
                         
                     elif current_state == ArmControllerStatus.Brake:
                         state_machine.handle_brake(device)
@@ -431,7 +436,7 @@ class ArmControllerMp(BaseController):
                             )
                     
                     # CSV记录
-                    # error_status = ArmErrorStatus(shared_memory.error_status.value)
+                    # error_status = ArmErrorStatus(arm_ipc.error_status.value)
                     # csv_logger.log(current_state, motor_pos, target_pos, temps, error_status)
                     
                     time.sleep(task_interval)
@@ -439,17 +444,18 @@ class ArmControllerMp(BaseController):
                 except Exception as e:
                     print(f"[Device {device_id}] 循环异常: {e}")
                     # 记录错误并尝试继续
-                    shared_memory.error_status.value = ArmErrorStatus.Error.value
+                    arm_ipc.error_status.value = ArmErrorStatus.Error.value
                     
         finally:
-            # 清理
-            csv_logger.close()
-            
-            # 生成最终报告
-            summary = status_tracker.get_summary()
-            print(f"\n[Device {device_id}] 运行报告:")
-            print(f"  运行时间: {summary['runtime_seconds']:.2f}秒")
-            print(f"  最高温度: {summary['max_temperatures']}")
-            print(f"  错误次数: {summary['error_count']}")
-            
-            hex_api.close()
+            pass
+        # 清理
+        csv_logger.close()
+        
+        # 生成最终报告
+        summary = status_tracker.get_summary()
+        print(f"\n[Device {device_id}] 运行报告:")
+        print(f"  运行时间: {summary['runtime_seconds']:.2f}秒")
+        print(f"  最高温度: {summary['max_temperatures']}")
+        print(f"  错误次数: {summary['error_count']}")
+        
+        hex_api.close()

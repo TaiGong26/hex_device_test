@@ -8,8 +8,8 @@ from collections import deque
 
 from .BaseCoordinator import BaseCoordinator
 from ..controllers.ArmControllerProcess import ArmControllerMp as Controller
-from ..statuses.ArmStatus import ArmCoordinatorStatus,ArmControllerStatus,ArmCoordinatorProcessStateMachine,ArmErrorStatus
-from ..statuses.SharedMemory import ArmProcessCommunication,ArmProcessCommunicationManager
+from ..statuses.ArmStatus import ArmCmdStatus,ArmCoordinatorStatus,ArmControllerStatus,ArmCoordinatorProcessStateMachine,ArmErrorStatus
+from ..statuses.ArmProcessCommunication import ArmCommChannel,ArmCommChannelManager
 
 class ArmCoordinator(BaseCoordinator):
     
@@ -24,8 +24,8 @@ class ArmCoordinator(BaseCoordinator):
         # 
         # self._status_queue = mp.Queue(maxsize=50)
         
-        # 共享内存管理
-        self._shared_memory: Dict[int, ArmProcessCommunication]
+        # 进程通信管理
+        self._arm_ipc: Dict[int, ArmCommChannel]
         
         # 状态机
         self._state_machine: ArmCoordinatorProcessStateMachine
@@ -37,9 +37,6 @@ class ArmCoordinator(BaseCoordinator):
         self._device_states: Dict[int, ArmControllerStatus]
         self._error_states: Dict[int, ArmErrorStatus]
         
-        
-        
-        
         self.start(device_ws_url_list, enable_kcp, arm_config)
     
     def start(self, device_ws_url_list, enable_kcp, arm_config):
@@ -48,12 +45,12 @@ class ArmCoordinator(BaseCoordinator):
             print("device ip list is None")
             return False
         
-        shm_manager = ArmProcessCommunicationManager()
+        shm_manager = ArmCommChannelManager()
         
         # create controllers
         for idx, ip in enumerate(device_ws_url_list):
-            device_shm = shm_manager.create_shared_memory(idx)
-            self._shared_memory[idx] = device_shm
+            device_shm = shm_manager.create_arm_ipc(idx)
+            self._arm_ipc[idx] = device_shm
             
             controller = Controller(
                 ws_url=ip,
@@ -62,7 +59,7 @@ class ArmCoordinator(BaseCoordinator):
                 task_loop_hz=100,
                 device_id=idx
             )
-            controller.set_shared_memory(device_shm)
+            controller.set_arm_ipc(device_shm)
             self._controllers_list.append(controller)
         
         # event init
@@ -84,6 +81,12 @@ class ArmCoordinator(BaseCoordinator):
     
     
     def shutdown(self):
+        # 更新状态为stoped
+        self._state_machine.transition_to(ArmCoordinatorStatus.Stopped, "shutdown")
+        # wait exit status
+        
+        
+        
         # from threading to stop controllers
         crl_shutdown_queue = deque()
         with self.controller_lock:
@@ -98,6 +101,8 @@ class ArmCoordinator(BaseCoordinator):
         if self._task:
             self._task.join(timeout=0.1)
             self._task = None
+        
+        # 销毁所有进程资源
             
         self._stop_event.set()
         print("-------------------------------- Process shutdown ----------------------------------")
@@ -105,7 +110,7 @@ class ArmCoordinator(BaseCoordinator):
     
     
     # ============ command ==============
-    def publish_command(self,cmd:Optional[str] = None):
+    def publish_command(self,cmd:int):
         try:
             for controller in self._controllers_list:
                 controller.set_current_cmd(cmd)
@@ -115,30 +120,28 @@ class ArmCoordinator(BaseCoordinator):
     
     
     # ============ 状态检查 ==============
-    def get_controller_status(self) -> List[ArmControllerStatus]:
-        return
-    
-    
-    def check_any_device_error(self) -> List[ArmControllerStatus]:
-        return
-    
-    def has_pending_command(self) -> List[ArmControllerStatus]:
-        return 
-    
-    def _scan_device_states(self) -> None:
-        pass
-    
-    
+    def get_all_controller_status(self) -> List[ArmControllerStatus]:
+        """获取所有子进程状态"""
+        return [
+            ArmControllerStatus(shm.controller_status.value)
+            for shm in self._arm_ipc.values()
+        ]
+
+    def check_any_device_error(self) -> bool:
+        """检查是否有设备报错"""
+        return any(
+            shm.error_status.value >= ArmErrorStatus.Error.value
+            for shm in self._arm_ipc.values()
+        )
+
+    def has_pending_command(self, cmd: ArmCmdStatus) -> bool:
+        """检查设备命令"""
+        return any(
+            shm.cmd_status.value == cmd.value
+            for shm in self._arm_ipc.values()
+        )
     
     # ============ callback ==============
-    
-    def all_brake_command(self):
-        pass
-
-    def all_home_command(self):
-        pass
-    
-    
     
     # def _task_loop(self):
     #     try:
@@ -148,9 +151,8 @@ class ArmCoordinator(BaseCoordinator):
     #             pass
     #     except Exception as e:
     #         print(f"Err task loop: {e}")
-            
-            
-    # 
+    
+    
     def _task_loop(self) -> None:
         """协调器主循环 - 20Hz"""
         try:
@@ -170,7 +172,7 @@ class ArmCoordinator(BaseCoordinator):
 
     def _scan_device_states(self) -> None:
         """扫描所有子进程的共享内存状态"""
-        for device_id, shm in self._shared_memory.items():
+        for device_id, shm in self._arm_ipc.items():
             error_status = ArmErrorStatus(shm.error_status.value)
             controller_status = ArmControllerStatus(shm.controller_status.value)
             
@@ -178,7 +180,7 @@ class ArmCoordinator(BaseCoordinator):
             self._device_states[device_id] = controller_status
             self._error_states[device_id] = error_status
             
-            # 检测状态变化并记录
+            # # 检测状态变化并记录
             # if controller_status != self._last_device_states.get(device_id):
             #     print(f"[Coordinator] dev{device_id}状态: {controller_status.name}")
             #     self._last_device_states[device_id] = controller_status
@@ -187,3 +189,6 @@ class ArmCoordinator(BaseCoordinator):
             if error_status != ArmErrorStatus.Normal:
                 print(f"[dev{device_id}] is error")
                 self._state_machine.transition_to(ArmCoordinatorStatus.Error,"get device error status")
+                
+    def _check_consistency(self):
+        pass
