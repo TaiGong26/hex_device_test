@@ -52,4 +52,3 @@ class ArmProcessCommunicationManager:
             shm.cleanup()
         self._shared_memories.clear()
         
-    def all_pipe_
