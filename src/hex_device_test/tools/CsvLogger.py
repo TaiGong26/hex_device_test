@@ -20,16 +20,16 @@ class CsvLogger:
         'temp_0', 'temp_1', 'temp_2', 'temp_3', 'temp_4', 'temp_5'
     ]
     
-    def __init__(self, device_id: int, log_dir: str = "./logs"):
+    def __init__(self, robot_type, device_id: int):
         self.device_id = device_id
-        self.log_dir = log_dir
-        os.makedirs(log_dir, exist_ok=True)
+        self.log_dir = "~/hex_device_logs"
+        os.makedirs(self.log_dir, exist_ok=True)
         
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        self.file_path = f"{log_dir}/arm_{device_id}_{timestamp}.csv"
+        self.file_path = f"{self.log_dir}/{robot_type}_{device_id}_{timestamp}.csv"
         
         self._buffer: List[Dict] = []
-        self._buffer_size = 100
+        # self._buffer_size = 100
         self._file = None
         self._writer = None
         
@@ -61,8 +61,8 @@ class CsvLogger:
         
         self._buffer.append(row)
         
-        if len(self._buffer) >= self._buffer_size:
-            self.flush()
+        # if len(self._buffer) >= self._buffer_size:
+        #     self.flush()
     
     def flush(self) -> None:
         """刷新缓冲区到磁盘"""

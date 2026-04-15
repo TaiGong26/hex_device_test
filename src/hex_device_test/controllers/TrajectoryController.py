@@ -109,13 +109,17 @@ class ReturnHomeController:
         self.home_position = np.array(home_position)
         self.duration = duration
         self.start_time = time.time()
+        self.done = False
         
     def get_target_position(self):
         """Get the current target position during return home"""
         current_time = time.time()
         elapsed_time = current_time - self.start_time
         
-        if elapsed_time >= self.duration:
+        if np.allclose(self.start_position,self.home_position):
+            self.done = True
+        
+        if elapsed_time >= self.duration or self.done:
             return self.home_position, True  # Reached home
         
         # Calculate normalized time [0, 1]
