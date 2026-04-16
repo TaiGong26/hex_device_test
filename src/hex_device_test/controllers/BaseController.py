@@ -49,10 +49,6 @@ class BaseController(ABC):
     #     ):
     #     pass
     
-    @abstractmethod
-    def publish_command(self,command_type:str,target_position):
-        pass
-    
     # @abstractmethod
     # def update_status(self, new_status:dict):
     #     pass
