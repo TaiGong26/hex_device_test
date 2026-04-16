@@ -18,9 +18,23 @@ class ArmCommChannel:
         # cmd做修改，通过pipe发，共享内存读 
         self.cmd_status = multiprocessing.Value("i",0) # main process read only
         
+        self._lock = multiprocessing.Lock()
+        
         self.cmd_recv_pipe,self.cmd_send_pipe = multiprocessing.Pipe(duplex=False)
         
         # self.manager = Manager()
+    
+    # def get_error_status(self):
+    #     with self._lock:
+    #         return self.error_status.value
+    
+    # def get_error_status(self):
+    #     with self._lock:
+    #         return self.error_status.value
+    
+    # def get_error_status(self):
+    #     with self._lock:
+    #         return self.error_status.value
         
     def cleanup(self):
         if hasattr(self,"manager"):

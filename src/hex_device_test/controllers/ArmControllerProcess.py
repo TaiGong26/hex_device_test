@@ -1,5 +1,5 @@
 import time
-from typing import Optional, Dict
+from typing import List, Optional, Dict
 import numpy as np
 import traceback
 import copy
@@ -60,6 +60,19 @@ from ..controllers.arm_state_machine_process import ArmControllerProcessStateMac
 #             'errors': self._error_history.copy()
 #         }
 
+class ArmStatusTable:
+    def __init__(self):
+        self._start_time = time.process_time()
+        self._motor_temps = [0.0] * 7
+        self._log:List[Dict] = []
+
+    
+    def update(self):
+        pass
+    
+    def get_summary(self):
+        pass
+
 class ArmControllerMp(BaseController):
         
     def __init__(self, ws_url:str, local_port:int=0, enable_kcp:bool=False, task_loop_hz:int=500, device_id:int=0):
@@ -118,7 +131,7 @@ class ArmControllerMp(BaseController):
                 self._task_process.join()
             
               
-            print(f"[Controller {self._device_id}]: ------------------------------------ shutdown complete ------------------------------------")
+            # print(f"[Controller {self._device_id}]: ------------------------------------ shutdown complete ------------------------------------")
         except RuntimeError as e:
             print(f"[Controller {self._device_id}, RuntimeError]: {e}")
         

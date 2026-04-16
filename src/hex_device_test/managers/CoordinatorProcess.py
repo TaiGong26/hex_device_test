@@ -48,7 +48,7 @@ class ArmCoordinator(BaseCoordinator):
         
         # create controllers
         for idx, ip in enumerate(device_ws_url_list):
-            device_shm = self._arm_ipc.create_arm_ipc(idx)
+            device_ipc = self._arm_ipc.create_arm_ipc(idx)
             
             controller = Controller(
                 ws_url=ip,
@@ -58,7 +58,7 @@ class ArmCoordinator(BaseCoordinator):
                 device_id=idx
             )
             
-            controller.set_arm_ipc(device_shm)
+            controller.set_arm_ipc(device_ipc)
             self._controllers_list.append(controller)
         
         # event init
@@ -155,14 +155,14 @@ class ArmCoordinator(BaseCoordinator):
     def get_all_controller_status(self) -> List[ArmControllerStatus]:
         """获取所有子进程状态"""
         return [
-            ArmControllerStatus(shm.controller_status.value)
-            for shm in self._arm_ipc.get_ipc_dict().values()
+            ArmControllerStatus(ipc.controller_status.value)
+            for ipc in self._arm_ipc.get_ipc_dict().values()
         ]
 
     def check_any_device_error(self) -> bool:
         """检查是否有设备报错"""
-        for idx, shm in self._arm_ipc.get_ipc_dict().items():
-            status = ArmErrorStatus(shm.error_status.value)
+        for idx, ipc in self._arm_ipc.get_ipc_dict().items():
+            status = ArmErrorStatus(ipc.error_status.value)
 
             if status.value > ArmErrorStatus.Warning.value:
                 return True, f"dev{idx} {status.name}"
@@ -172,8 +172,8 @@ class ArmCoordinator(BaseCoordinator):
     def has_pending_command(self, cmd: ArmCmdStatus) -> bool:
         """检查设备命令"""
         return any(
-            shm.cmd_status.value == cmd.value
-            for shm in self._arm_ipc.get_ipc_dict().values()
+            ipc.cmd_status.value == cmd.value
+            for ipc in self._arm_ipc.get_ipc_dict().values()
         )
     
     # ============ callback ==============
@@ -202,9 +202,9 @@ class ArmCoordinator(BaseCoordinator):
         ipc_dict = self._arm_ipc.get_ipc_dict()
             
         
-        for device_id, shm in ipc_dict.items():
-            error_status = ArmErrorStatus(shm.error_status.value)
-            controller_status = ArmControllerStatus(shm.controller_status.value)
+        for device_id, ipc in ipc_dict.items():
+            error_status = ArmErrorStatus(ipc.error_status.value)
+            controller_status = ArmControllerStatus(ipc.controller_status.value)
             
             # 更新本地缓存
             self._device_states[device_id] = controller_status
