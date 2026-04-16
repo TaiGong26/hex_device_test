@@ -122,6 +122,9 @@ class ReturnHomeController:
         if elapsed_time >= self.duration or self.done:
             return self.home_position, True  # Reached home
         
+        # if self.done:
+        #     return self.home_position, True  # Reached home
+        
         # Calculate normalized time [0, 1]
         t = elapsed_time / self.duration
         

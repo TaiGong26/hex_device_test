@@ -1,6 +1,7 @@
 from typing import List, Tuple, Optional,Any
 
 from hex_device import Arm, MotorBase, MotorError
+from hex_device import public_api_types_pb2
 
 from hex_device_test.statuses.ArmStatus import ArmErrorStatus
 
@@ -18,14 +19,6 @@ class ArmErrorChecker:
         """
         errors = []
         
-        # 1. 检查通信状态
-        # if not ArmErrorChecker._check_communication(device):
-        #     errors.append("COMM_LOST: 通信中断")
-        
-        # 2. 检查电机温度
-        # temp_errors = ArmErrorChecker._check_temperatures(device)
-        # errors.extend(temp_errors)
-        
         # 2. device error check
         err_dev,err_code_dev,reason = ArmErrorChecker._check_device_error(device)
         if err_dev:
@@ -37,14 +30,10 @@ class ArmErrorChecker:
             reasons = []
             for idx, err in enumerate(reason):
                 if err is not None:
-                    res = f"m{idx} err:{MotorError(err).name}"
+                    res = f"motor{idx} err:{MotorError(err).name}"
                     reasons.append(res)
             
             errors.append((err_code_motor,reasons))
-        
-        # 4. 
-        # device_errors = ArmErrorChecker._check_device_errors(device)
-        # errors.extend(device_errors)
         
         return len(errors) > 0, errors
     
@@ -57,12 +46,12 @@ class ArmErrorChecker:
         return bool , reason
         """
         error_info = device.get_parking_stop_detail()
-        # if error_info.category == 5:
-        #     return True, ArmErrorStatus.ConnError, "API Time Out"
+        if error_info.category == 5:
+            return True, ArmErrorStatus.ConnError, error_info.category
         
         if error_info.category in (1,2,4,6,7):
             # specific reason in public_api_types.proto enum ParkingStopCategory
-            return True, ArmErrorStatus.ArmError, error_info.reason
+            return True, ArmErrorStatus.ArmError, error_info.category
         
         return False, ArmErrorStatus.Normal, None
     
@@ -73,6 +62,9 @@ class ArmErrorChecker:
         return bool , reason
         """
         error_codes = device.get_motor_error_codes()
+        if error_codes is None :
+            return False, ArmErrorStatus.Normal, None
+            
         for i, code in enumerate(error_codes):
             if code is not None:
                 return True, ArmErrorStatus.MotorError, error_codes
@@ -80,5 +72,11 @@ class ArmErrorChecker:
         return False, ArmErrorStatus.Normal, None
     
     @staticmethod
-    def _check_communication_error(device):
-        return
+    def format_error(code: ArmErrorStatus, reason: Any) -> str:
+        if code == ArmErrorStatus.MotorError:
+            return (f"motor{idx} err:"
+                for idx, reason in enumerate(reason)
+                if reason is not None)
+                
+        elif code in (ArmErrorStatus.ConnError, ArmErrorStatus.ArmError):
+            return public_api_types_pb2.ParkingStopCategory.Name(reason)
