@@ -12,6 +12,7 @@ from ..controllers.ArmControllerProcess import ArmControllerMp as Controller
 from ..controllers.arm_state_machine_process import ArmCoordinatorProcessStateMachine
 from ..statuses.ArmStatus import ArmCmdStatus,ArmCoordinatorStatus,ArmControllerStatus,ArmErrorStatus
 from ..statuses.ArmProcessIPC import ArmCommChannel,ArmCommChannelManager
+from ..tools.CsvLogger import write_csv
 
 class ArmCoordinator(BaseCoordinator):
     
@@ -25,6 +26,7 @@ class ArmCoordinator(BaseCoordinator):
         
         # 进程通信管理
         self._arm_ipc = ArmCommChannelManager()
+        self._mp_quque = mp.Queue()
         
         # 状态机
         self._state_machine: ArmCoordinatorProcessStateMachine = ArmCoordinatorProcessStateMachine(self)
@@ -70,6 +72,7 @@ class ArmCoordinator(BaseCoordinator):
             controller.set_arm_config(arm_config)
             controller.set_waypoints(self._waypoints)
             controller.set_view(self._enable_view)
+            controller.set_mp_queue(self._mp_quque)
             # controller.set_status_callback(self._controller_status_changed)
         
         for controller in self._controllers_list:
@@ -105,12 +108,19 @@ class ArmCoordinator(BaseCoordinator):
             self._task.join(timeout=0.1)
             self._task = None
         
+        # 获取队列参数
+        # while not self._mp_quque.empty():
+        #     info = self._mp_quque.get()
+        #     print(info)
+        t = time.strftime("%Y-%m-%d %H:%M:%S")
+        write_csv(self._mp_quque,f"~/hex_device_log/arm_test_{t}.csv")
+        
         # ipc_clean
         self._ipc_clean()
-            
+        self._mp_quque.close()
+        
         self._stop_event.set()
         print("-------------------------------- Process shutdown ----------------------------------")
-    
     
     def _ipc_clean(self):
         try:
@@ -190,7 +200,6 @@ class ArmCoordinator(BaseCoordinator):
                 # 2. 状态机步进
                 self._state_machine.step()
             
-                
                 time.sleep(0.01)  # 20Hz
         except Exception as e:
             print(f"[Coordinator] 主循环异常: {e}")
@@ -200,7 +209,6 @@ class ArmCoordinator(BaseCoordinator):
     def _scan_device_states(self) -> None:
         """扫描所有子进程的共享内存状态"""
         ipc_dict = self._arm_ipc.get_ipc_dict()
-            
         
         for device_id, ipc in ipc_dict.items():
             error_status = ArmErrorStatus(ipc.get_error_status())

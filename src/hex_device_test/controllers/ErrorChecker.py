@@ -46,8 +46,8 @@ class ArmErrorChecker:
         return bool , reason
         """
         error_info = device.get_parking_stop_detail()
-        # if error_info.category == 5:
-        #     return True, ArmErrorStatus.ConnError, error_info.category
+        if error_info.category == 5:
+            return True, ArmErrorStatus.ConnError, error_info.category
         
         if error_info.category in (1,2,4,6,7):
             # specific reason in public_api_types.proto enum ParkingStopCategory

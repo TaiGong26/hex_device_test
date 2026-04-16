@@ -125,6 +125,7 @@ class ArmControllerMp(BaseController):
         
         # 共享内存引用（由协调器传入）
         self._arm_ipc: Optional[ArmCommChannel] = None
+        self._mp_queue = None
     
     def start(self) -> bool:
         
@@ -140,7 +141,8 @@ class ArmControllerMp(BaseController):
                 self._task_loop_hz,
                 self._waypoints,
                 self._arm_ipc,
-                self._arm_config
+                self._arm_config,
+                self._mp_queue
             ))
             self._task_process.start()
 
@@ -183,6 +185,9 @@ class ArmControllerMp(BaseController):
     
     def set_arm_ipc(self,ipc):
         self._arm_ipc = ipc
+        
+    def set_mp_queue(self,queue):
+        self._mp_queue = queue
     
     
     # ==================== getting ====================
@@ -244,7 +249,6 @@ class ArmControllerMp(BaseController):
         sender.add_data(data)
         # sender.send_json(data)
     
-
     def _task_loop(self, 
         ws_url, 
         enable_kcp, 
@@ -253,7 +257,9 @@ class ArmControllerMp(BaseController):
         loop_running, 
         task_hz, 
         waypoints, 
-        arm_ipc:ArmCommChannel):
+        arm_ipc:ArmCommChannel,
+        arm_config,
+        mp_queue:mp.Queue):
         """
         子进程主循环
         """
@@ -290,6 +296,7 @@ class ArmControllerMp(BaseController):
                         for dev in hex_api.device_list:
                             if isinstance(dev, Arm):
                                 device = dev
+                                device.reload_arm_config_from_dict(arm_config)
                                 break
                     
                     if device is None:
@@ -319,7 +326,6 @@ class ArmControllerMp(BaseController):
                         final_error_msg = " | ".join(error_details)
                         
                         state_machine.transition(ArmControllerStatus.Brake, f"errors: {final_error_msg}")
-                        
                         
                     # 获取当前目标位置
                     target_pos = trajectory.get_current_target()
@@ -378,7 +384,7 @@ class ArmControllerMp(BaseController):
                     pass
                 
                 except Exception as e:
-                    print(f"[Device {device_id}] 循环异常: {e}")
+                    print(f"[Dev {device_id}] 循环异常: {e}")
                     # 记录错误并尝试继续
                     arm_ipc.set_error_status(ArmErrorStatus.ProcessError.value)
                     traceback.print_exc()
@@ -390,14 +396,10 @@ class ArmControllerMp(BaseController):
         if arm_ipc.cmd_recv_pipe.poll(timeout=0.01):
             value = arm_ipc.cmd_recv_pipe.recv()
         arm_ipc.cmd_recv_pipe.close()
-        # csv_logger.close()
-        print(f"[dev{device_id}] {device_state.get_summary()}")
         
-        # 生成最终报告
-        # summary = status_tracker.get_summary()
-        # print(f"\n[Device {device_id}] 运行报告:")
-        # # print(f"  运行时间: {summary['runtime_seconds']:.2f}秒")
-        # print(f"  最高温度: {summary['max_temperatures']}")
-        # print(f"  错误次数: {summary['error_count']}")
+        # report
+        report = {}
+        report[device_id] = device_state.get_summary()
+        mp_queue.put(report)
         
         hex_api.close()
