@@ -18,7 +18,7 @@ from ..tools.CsvLogger import CsvLogger
 from .BaseController import BaseController
 from .TrajectoryController import TrajectoryPlanner
 
-from ..statuses.ArmProcessCommunication import ArmCommChannel
+from ..statuses.ArmProcessIPC import ArmCommChannel
 from ..statuses.ArmStatus import ArmControllerStatus,ArmErrorStatus
 from ..controllers.arm_state_machine_process import ArmControllerProcessStateMachine
 
@@ -292,7 +292,7 @@ class ArmControllerMp(BaseController):
                     # 判断pipe是否有命令可读，然后更新命令
                     if arm_ipc.cmd_recv_pipe.poll(timeout=0.01):
                         value = arm_ipc.cmd_recv_pipe.recv()
-                        arm_ipc.cmd_status.value = value
+                        arm_ipc.set_cmd_status(value)
                     
                     # 状态机处理
                     current_state = state_machine.get_state()
@@ -327,7 +327,7 @@ class ArmControllerMp(BaseController):
                                 dev.get_my_session_id(),
                                 dev.get_session_holder(),
                                 current_state.value,
-                                arm_ipc.error_status.value
+                                arm_ipc.get_error_status()
                             )
                     
                     # CSV记录: 30s记录一次
@@ -343,7 +343,7 @@ class ArmControllerMp(BaseController):
                 except Exception as e:
                     print(f"[Device {device_id}] 循环异常: {e}")
                     # 记录错误并尝试继续
-                    arm_ipc.error_status.value = ArmErrorStatus.ProcessError.value
+                    arm_ipc.set_error_status(ArmErrorStatus.ProcessError.value)
                     traceback.print_exc()
                     
         finally:

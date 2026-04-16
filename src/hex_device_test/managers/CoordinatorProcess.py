@@ -11,7 +11,7 @@ from .BaseCoordinator import BaseCoordinator
 from ..controllers.ArmControllerProcess import ArmControllerMp as Controller
 from ..controllers.arm_state_machine_process import ArmCoordinatorProcessStateMachine
 from ..statuses.ArmStatus import ArmCmdStatus,ArmCoordinatorStatus,ArmControllerStatus,ArmErrorStatus
-from ..statuses.ArmProcessCommunication import ArmCommChannel,ArmCommChannelManager
+from ..statuses.ArmProcessIPC import ArmCommChannel,ArmCommChannelManager
 
 class ArmCoordinator(BaseCoordinator):
     
@@ -155,14 +155,14 @@ class ArmCoordinator(BaseCoordinator):
     def get_all_controller_status(self) -> List[ArmControllerStatus]:
         """获取所有子进程状态"""
         return [
-            ArmControllerStatus(ipc.controller_status.value)
+            ArmControllerStatus(ipc.get_controller_status())
             for ipc in self._arm_ipc.get_ipc_dict().values()
         ]
 
     def check_any_device_error(self) -> bool:
         """检查是否有设备报错"""
         for idx, ipc in self._arm_ipc.get_ipc_dict().items():
-            status = ArmErrorStatus(ipc.error_status.value)
+            status = ArmErrorStatus(ipc.get_error_status())
 
             if status.value > ArmErrorStatus.Warning.value:
                 return True, f"dev{idx} {status.name}"
@@ -172,7 +172,7 @@ class ArmCoordinator(BaseCoordinator):
     def has_pending_command(self, cmd: ArmCmdStatus) -> bool:
         """检查设备命令"""
         return any(
-            ipc.cmd_status.value == cmd.value
+            ipc.get_cmd_status() == cmd.value
             for ipc in self._arm_ipc.get_ipc_dict().values()
         )
     
@@ -203,8 +203,8 @@ class ArmCoordinator(BaseCoordinator):
             
         
         for device_id, ipc in ipc_dict.items():
-            error_status = ArmErrorStatus(ipc.error_status.value)
-            controller_status = ArmControllerStatus(ipc.controller_status.value)
+            error_status = ArmErrorStatus(ipc.get_error_status())
+            controller_status = ArmControllerStatus(ipc.get_controller_status())
             
             # 更新本地缓存
             self._device_states[device_id] = controller_status

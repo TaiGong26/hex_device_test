@@ -3,7 +3,7 @@ import time
 from typing import List,Optional
 
 from ..managers.Coordinator import ArmCoordinatorStatus
-from ..statuses.ArmProcessCommunication import ArmCommChannel
+from ..statuses.ArmProcessIPC import ArmCommChannel
 from ..statuses.ArmStatus import ArmControllerStatus, ArmCoordinatorStatus, ArmErrorStatus,ArmCmdStatus
 from  ..controllers.ErrorChecker import ArmErrorChecker
 from ..controllers.TrajectoryController import ReturnHomeController
@@ -23,7 +23,8 @@ class ArmCoordinatorProcessStateMachine:
         ArmCoordinatorStatus.Ready: [
             ArmCoordinatorStatus.Running,
             ArmCoordinatorStatus.Error,
-            ArmCoordinatorStatus.Exit
+            ArmCoordinatorStatus.Stopped
+            # ArmCoordinatorStatus.Exit
         ],
         ArmCoordinatorStatus.Running: [
             ArmCoordinatorStatus.Stopped,
@@ -105,7 +106,13 @@ class ArmCoordinatorProcessStateMachine:
             
         # check cmd
         # stopped -> exit
-        
+        if self._coordinator.has_pending_command(ArmCmdStatus.STOPPED):
+            all_ready = all(
+                status == ArmControllerStatus.Stopped
+                for status in self._coordinator.get_all_controller_status()
+            )
+            if all_ready:
+                self.transition_to(ArmCoordinatorStatus.Stopped, "stop")
 
         # 发布running
         if self._auto_send_cmd:
@@ -273,8 +280,8 @@ class ArmControllerProcessStateMachine:
         ArmControllerStatus.Exit: []
     }
     
-    def __init__(self, id, shared_memory: ArmCommChannel):
-        self._shared_memory = shared_memory
+    def __init__(self, id, arm_ipc: ArmCommChannel):
+        self._arm_ipc = arm_ipc
         self._state = ArmControllerStatus.Init
         self._last_reported_state = None
         self._first_start = True
@@ -296,7 +303,7 @@ class ArmControllerProcessStateMachine:
         self._state = new_state
         
         # 更新共享内存（仅在状态变化时）
-        self._shared_memory.controller_status.value = new_state.value
+        self._arm_ipc.set_controller_status(new_state.value)
         return True
     
     def get_state(self) -> ArmControllerStatus:
@@ -455,19 +462,19 @@ class ArmControllerProcessStateMachine:
         - 退出循环
         """
         # 标记完成
-        self._shared_memory.controller_status.value = ArmControllerStatus.Exit.value
+        self._arm_ipc.set_controller_status(ArmControllerStatus.Exit.value)
     
     def _check_cmd(self, cmd: ArmCmdStatus) -> bool:
         """检查当前命令"""
-        return self._shared_memory.cmd_status.value == cmd.value
+        return self._arm_ipc.get_cmd_status() == cmd.value
     
     # def _report_errors(self, errors: List[ArmErrorChecker]) -> None:
     #     """报告错误到共享内存"""
     #     # 根据具体的error report
-    #     # self._shared_memory.error_status.value = ArmErrorStatus.Error.value
+    #     # self._arm_ipc.error_status.value = ArmErrorStatus.Error.value
     #     error_code = min(errors, key=lambda x: x.value)
-    #     self._shared_memory.error_status.value = error_code.value
+    #     self._arm_ipc.error_status.value = error_code.value
     #     # 记录详细错误信息
     #     # for error in errors:
     #     #     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    #     #     # self._shared_memory.runtime_errors[timestamp] = error
+    #     #     # self._arm_ipc.runtime_errors[timestamp] = error
