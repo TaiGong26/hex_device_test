@@ -8,7 +8,7 @@ from collections import deque
 import multiprocessing as mp
 # mp.set_start_method('forkserver', force=True)
 
-from hex_device import HexDeviceApi
+from hex_device import HexDeviceApi, MotorError
 from hex_device import Arm, CommandType, Hands
 
 from hex_device_test.controllers.ErrorChecker import ArmErrorChecker
@@ -61,27 +61,53 @@ from ..controllers.arm_state_machine_process import ArmControllerProcessStateMac
 #         }
 
 class ArmStatusTable:
-    def __init__(self,robot_type):
-        self._start_time = time.process_time()
-        self._state = ArmErrorStatus.Normal
-        self._log:List[Dict] = []
-        self._run_time = None
-        self.motor_templates = None
-        self.motor_divice_templates = None
-        self.errors = []
+    def __init__(self):
+        self._start_time = time.time()
+        self._state:ArmErrorStatus = ArmErrorStatus.Normal
+        self._run_time = 0.0
+        self._motor_max_temps = None
+        self._driver_max_temps = None
+        self._errors = deque(maxlen=10)
+        self._error_set = set()
 
-        # 电机电压
-    
-    
-    def update(self):
-        self._run_time = time.process_time()
-        pass
-    
-    def set_motor_count(self,num):
-        pass
-    
+    def update(self, motor_temps:Optional[np.ndarray], driver_temps:Optional[np.ndarray]):
+        self._run_time = time.time() - self._start_time
+
+        if motor_temps is not None:
+            motor_temps = np.asarray(motor_temps, dtype=float)
+            if self._motor_max_temps is None:
+                self._motor_max_temps = motor_temps.copy()
+            else:
+                np.maximum(self._motor_max_temps, motor_temps, out=self._motor_max_temps)
+
+        if driver_temps is not None:
+            driver_temps = np.asarray(driver_temps, dtype=float)
+            if self._driver_max_temps is None:
+                self._driver_max_temps = driver_temps.copy()
+            else:
+                np.maximum(self._driver_max_temps, driver_temps, out=self._driver_max_temps)
+
+    def set_error(self, state, error_msg: str):
+        key = (state,error_msg)
+        if key in self._error_set:
+            return
+        self._error_set.add(key)
+        
+        self._state:ArmErrorStatus = state
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        self._errors.append(f"[{timestamp}] errType: {state.name}, errMsg: {error_msg}")
+
     def get_summary(self):
-        pass
+        motor_temps = self._motor_max_temps.tolist() if hasattr(self._motor_max_temps,"tolist") else None
+        dev_temps =  self._driver_max_temps.tolist() if hasattr( self._driver_max_temps,"tolist") else None
+
+        return {
+            "state": self._state.name,
+            "run_time": self._run_time,
+            "motor_max_temperature": motor_temps,
+            "motor_driver_max_temperature": dev_temps,
+            "errors": self._errors.copy()
+        }
 
 
 
@@ -113,7 +139,8 @@ class ArmControllerMp(BaseController):
                 self._loop_running,
                 self._task_loop_hz,
                 self._waypoints,
-                self._arm_ipc
+                self._arm_ipc,
+                self._arm_config
             ))
             self._task_process.start()
 
@@ -233,6 +260,7 @@ class ArmControllerMp(BaseController):
         # 初始化组件
         state_machine = ArmControllerProcessStateMachine(device_id,arm_ipc)
         # status_tracker = ArmStatusTracker(device_id)
+        device_state = ArmStatusTable()
         # csv_logger = CsvLogger(device_id)
         sender = PlotjuggleDraw()
         sender.start()
@@ -273,21 +301,25 @@ class ArmControllerMp(BaseController):
                         break
                     
                     # 扫描error
-                    # has_error, errors= ArmErrorChecker.check_device(device)
-                    # if has_error:
-                    #     error_codes = [err_tuple[0] for err_tuple in errors]
-                    #     min_error_code = min(error_codes, key=lambda x: x.value)
-                    #     arm_ipc.error_status.value = min_error_code.value
+                    has_error, errors= ArmErrorChecker.check_device(device)
+                    if has_error:
+                        error_codes:ArmErrorStatus = [err_tuple[0] for err_tuple in errors]
+                        min_error_code = min(error_codes, key=lambda x: x.value)
+                        arm_ipc.set_error_status(min_error_code.value)
                         
-                    #     error_details = []
-                    #     for code, reasons in errors:
-                    #         if isinstance(reasons, list):
-                    #             error_details.append(f"{code.name}: {', '.join(map(str, reasons))}")
-                    #         else:
-                    #             error_details.append(f"{code.name}: {reasons}")
-                    #     final_error_msg = " | ".join(error_details)
+                        # 处理电机错误或者Arm错误
+                        error_details = []
+                        err_c = None
+                        for code, reasons in errors:
+                            err_c = code
+                            info = ArmErrorChecker.format_error(err_c,reasons)
+                            error_details.append(f"{code.name}: {info}")
+                            device_state.set_error(code,info)
+                                
+                        final_error_msg = " | ".join(error_details)
                         
-                    #     state_machine.transition(ArmControllerStatus.Brake, f"errors: {final_error_msg}")
+                        state_machine.transition(ArmControllerStatus.Brake, f"errors: {final_error_msg}")
+                        
                         
                     # 获取当前目标位置
                     target_pos = trajectory.get_current_target()
@@ -336,7 +368,7 @@ class ArmControllerMp(BaseController):
                             )
                     
                     # running state update
-                    
+                    device_state.update(device.get_motor_temperatures(),device.get_motor_driver_temperatures())
                     
                     
                     # time.sleep(task_interval)
@@ -359,6 +391,7 @@ class ArmControllerMp(BaseController):
             value = arm_ipc.cmd_recv_pipe.recv()
         arm_ipc.cmd_recv_pipe.close()
         # csv_logger.close()
+        print(f"[dev{device_id}] {device_state.get_summary()}")
         
         # 生成最终报告
         # summary = status_tracker.get_summary()

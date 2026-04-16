@@ -204,10 +204,14 @@ class ArmCoordinatorProcessStateMachine:
         
         注：设备恢复接口仅定义，不具体实现
         """
-        if self._coordinator.has_pending_command(ArmCmdStatus.IDLE):
-            # 恢复运行
-            self.transition_to(ArmCoordinatorStatus.Init, "恢复运行")
-        elif self._coordinator.has_pending_command(ArmCmdStatus.STOPPED):
+        # if self._coordinator.has_pending_command(ArmCmdStatus.IDLE):
+        #     # 恢复运行
+        #     self.transition_to(ArmCoordinatorStatus.Init, "恢复运行")
+        # elif self._coordinator.has_pending_command(ArmCmdStatus.STOPPED):
+        #     # 退出
+        #     self.transition_to(ArmCoordinatorStatus.Exit, "异常退出")
+            
+        if self._coordinator.has_pending_command(ArmCmdStatus.STOPPED):
             # 退出
             self.transition_to(ArmCoordinatorStatus.Exit, "异常退出")
         # ZERO_STOPPED: 预留接口，不处理
@@ -220,7 +224,7 @@ class ArmCoordinatorProcessStateMachine:
             errors = self._coordinator.get_error_flag()
             for idx, check in enumerate(errors):
                 if not check:
-                    self._coordinator.publish_dev_command(ArmCmdStatus.BRAKE.value)
+                    self._coordinator.publish_dev_command(idx,ArmCmdStatus.BRAKE.value)
             
         
     def _handle_exit(self) -> None:
@@ -262,8 +266,11 @@ class ArmControllerProcessStateMachine:
             ArmControllerStatus.Brake
         ],
         ArmControllerStatus.Ready: [
+            ArmControllerStatus.Brake,
             ArmControllerStatus.Running,
-            ArmControllerStatus.Stopped
+            ArmControllerStatus.Stopped,
+            ArmControllerStatus.Exit
+            
         ],
         ArmControllerStatus.Running: [
             ArmControllerStatus.Stopped,
@@ -294,6 +301,9 @@ class ArmControllerProcessStateMachine:
     
     def transition(self, new_state: ArmControllerStatus, reason: str) -> bool:
         """状态转换并更新共享内存"""
+        if new_state == self._state:
+            return True
+        
         if new_state not in self.STATE_TRANSITIONS.get(self._state, []):
             print(f"[Dev{self._dev_id}] 非法状态转换: {self._state.name} -> {new_state.name}")
             return False

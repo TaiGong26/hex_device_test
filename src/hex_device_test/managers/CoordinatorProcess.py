@@ -210,11 +210,6 @@ class ArmCoordinator(BaseCoordinator):
             self._device_states[device_id] = controller_status
             self._error_states[device_id] = error_status
             
-            # # 检测状态变化并记录
-            # if controller_status != self._last_device_states.get(device_id):
-            #     print(f"[Coordinator] dev{device_id}状态: {controller_status.name}")
-            #     self._last_device_states[device_id] = controller_status
-            
             # check error
             if error_status != ArmErrorStatus.Normal and not self._error_flag[device_id]:
                 self._error_flag[device_id] = True
