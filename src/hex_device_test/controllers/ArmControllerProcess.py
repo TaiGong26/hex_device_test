@@ -61,17 +61,29 @@ from ..controllers.arm_state_machine_process import ArmControllerProcessStateMac
 #         }
 
 class ArmStatusTable:
-    def __init__(self):
+    def __init__(self,robot_type):
         self._start_time = time.process_time()
-        self._motor_temps = [0.0] * 7
+        self._state = ArmErrorStatus.Normal
         self._log:List[Dict] = []
+        self._run_time = None
+        self.motor_templates = None
+        self.motor_divice_templates = None
+        self.errors = []
 
+        # 电机电压
+    
     
     def update(self):
+        self._run_time = time.process_time()
+        pass
+    
+    def set_motor_count(self,num):
         pass
     
     def get_summary(self):
         pass
+
+
 
 class ArmControllerMp(BaseController):
         
@@ -80,13 +92,6 @@ class ArmControllerMp(BaseController):
         
         # device
         self._arm_config = None
-        
-        #data 
-        # self.data_queue = deque(maxlen=50)
-        # self.status_queue = None
-        # # lock
-        # self._status_lock = mp.Lock()
-        # self._data_lock = mp.Lock()
 
         # Task
         self._loop_running = mp.Event()
@@ -330,8 +335,8 @@ class ArmControllerMp(BaseController):
                                 arm_ipc.get_error_status()
                             )
                     
-                    # CSV记录: 30s记录一次
-                    # csv_logger.log(current_state, motor_pos, target_pos, temps, error_status)
+                    # running state update
+                    
                     
                     
                     # time.sleep(task_interval)

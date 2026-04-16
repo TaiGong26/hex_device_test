@@ -16,10 +16,6 @@ class BaseController(ABC):
         self._status_lock = None
         self._data_lock = None
 
-        # data 
-        
-        # status
-        self._current_cmd = None
         self._view = False
 
     
