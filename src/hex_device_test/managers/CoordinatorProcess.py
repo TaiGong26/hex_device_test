@@ -2,7 +2,6 @@ import traceback
 from typing import Optional, List,Dict
 import threading
 import time
-from enum import Enum
 import multiprocessing as mp
 from collections import deque
 
@@ -11,18 +10,19 @@ from .BaseCoordinator import BaseCoordinator
 from ..controllers.ArmControllerProcess import ArmControllerMp as Controller
 from ..controllers.arm_state_machine_process import ArmCoordinatorProcessStateMachine
 from ..statuses.ArmStatus import ArmCmdStatus,ArmCoordinatorStatus,ArmControllerStatus,ArmErrorStatus
-from ..statuses.ArmProcessIPC import ArmCommChannel,ArmCommChannelManager
+from ..statuses.ArmProcessIPC import ArmCommChannelManager
 from ..tools.CsvLogger import write_csv
 
 class ArmCoordinator(BaseCoordinator):
     
-    def __init__(self, device_ws_url_list: Optional[List[dict]] = None, enable_kcp: bool = False, arm_config: Optional[dict] = None, waypoints: Optional[List[dict]] = None, enable_view: bool = False):
+    def __init__(self, device_ws_url_list: Optional[List[dict]] = None, enable_kcp: bool = False, arm_config: Optional[dict] = None, waypoints: Optional[List[dict]] = None, enable_view: bool = False,check_timeout:bool=False):
         super().__init__()
         
         self._task = None
         self._enable_kcp = enable_kcp
         self._waypoints = waypoints
         self._enable_view = enable_view
+        self._check_timeout = check_timeout
         
         # 进程通信管理
         self._arm_ipc = ArmCommChannelManager()
@@ -72,6 +72,7 @@ class ArmCoordinator(BaseCoordinator):
             controller.set_arm_config(arm_config)
             controller.set_waypoints(self._waypoints)
             controller.set_view(self._enable_view)
+            controller.set_check_timeout(self._check_timeout)
             controller.set_mp_queue(self._mp_quque)
             # controller.set_status_callback(self._controller_status_changed)
         
@@ -80,7 +81,6 @@ class ArmCoordinator(BaseCoordinator):
             
         self._task: threading.Thread = threading.Thread(target=self._task_loop)
         self._task.start()
-        
     
     def shutdown(self):
         # 更新状态为stoped
@@ -90,7 +90,7 @@ class ArmCoordinator(BaseCoordinator):
         while self._state_machine._state != ArmCoordinatorStatus.Exit:
             time.sleep(0.1)
             stopped_time+=0.1
-            if stopped_time ==20 :
+            if stopped_time >=12 :
                 break
         
         # from threading to stop controllers
@@ -102,16 +102,13 @@ class ArmCoordinator(BaseCoordinator):
                 crl_shutdown_queue.append(t)      
         
         for t in crl_shutdown_queue:
-            t.join(timeout=20.0)
+            t.join(timeout=5.0)
             
         if self._task:
             self._task.join(timeout=0.1)
             self._task = None
         
-        # 获取队列参数
-        # while not self._mp_quque.empty():
-        #     info = self._mp_quque.get()
-        #     print(info)
+        # out csv
         t = time.strftime("%Y-%m-%d %H:%M:%S")
         write_csv(self._mp_quque,f"~/hex_device_log/arm_test_{t}.csv")
         
@@ -185,7 +182,13 @@ class ArmCoordinator(BaseCoordinator):
             ipc.get_cmd_status() == cmd.value
             for ipc in self._arm_ipc.get_ipc_dict().values()
         )
-    
+        
+    def get_device_error_reason(self,idx) -> str:
+        arm_ipc = self._arm_ipc.get_ipc_dict()
+        state = ArmErrorStatus(arm_ipc[idx].get_error_status())
+        
+        return state.name
+        
     # ============ callback ==============
     
     # ============ task ==============
@@ -198,7 +201,7 @@ class ArmCoordinator(BaseCoordinator):
                 self._scan_device_states()
                 
                 # 2. 状态机步进
-                self._state_machine.step()
+                self._state_machine.step(self.get_error_flag())
             
                 time.sleep(0.01)  # 20Hz
         except Exception as e:
@@ -222,5 +225,5 @@ class ArmCoordinator(BaseCoordinator):
             if error_status != ArmErrorStatus.Normal and not self._error_flag[device_id]:
                 self._error_flag[device_id] = True
                 print(f"[dev{device_id}] is error, reason{error_status.name}")
-                if self._state_machine._state != ArmCoordinatorStatus.Error:
-                    self._state_machine.transition_to(ArmCoordinatorStatus.Error,"get device error status")
+                # if self._state_machine._state != ArmCoordinatorStatus.Error:
+                #     self._state_machine.transition_to(ArmCoordinatorStatus.Error,"get device error status")
