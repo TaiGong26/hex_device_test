@@ -17,6 +17,7 @@ class BaseController(ABC):
         self._data_lock = None
 
         self._view = False
+        self._check_timeout = False
 
     
     # @abstractmethod

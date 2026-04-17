@@ -55,6 +55,13 @@ def main():
         help='Enable real-time visualization of the robotic arm trajectory'
     )
     
+    parser.add_argument(
+        '--timeout',
+        action='store_true',
+        default=False,
+        help='Enable real-time visualization of the robotic arm trajectory'
+    )
+    
     # =============== parse args ===============
     args = parser.parse_args()
     
@@ -66,6 +73,7 @@ def main():
     print(f"Device IP list: {dev_ip_list}")
     enable_kcp = args.KCP
     enable_view = args.view
+    check_timeout = args.timeout
     # config
     config_dict = {
         'name':'Archer_d6y',
@@ -107,7 +115,8 @@ def main():
             enable_kcp, 
             arm_config=config_dict,
             waypoints=arm_position,
-            enable_view=enable_view
+            enable_view=enable_view,
+            check_timeout=check_timeout
         )
         
         # 信号处理

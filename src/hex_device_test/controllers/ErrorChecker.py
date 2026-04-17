@@ -1,6 +1,6 @@
 from typing import List, Tuple, Optional,Any
 
-from hex_device import Arm, MotorBase, MotorError
+from hex_device import Arm, MotorError
 from hex_device import public_api_types_pb2
 
 from hex_device_test.statuses.ArmStatus import ArmErrorStatus
@@ -11,7 +11,7 @@ class ArmErrorChecker:
     """
     
     @staticmethod
-    def check_device(device: Arm) -> Tuple[bool, List[Tuple[ArmErrorStatus,List[Any]]]]:
+    def check_device(check_timeout:bool,device: Arm) -> Tuple[bool, List[Tuple[ArmErrorStatus,List[Any]]]]:
         """
         全面检查设备状态
         返回: (has_error, error_list)
@@ -20,7 +20,7 @@ class ArmErrorChecker:
         errors = []
         
         # 2. device error check
-        err_dev,err_code_dev,reason = ArmErrorChecker._check_device_error(device)
+        err_dev,err_code_dev,reason = ArmErrorChecker._check_device_error(check_timeout,device)
         if err_dev:
             errors.append((err_code_dev,reason))
         
@@ -38,7 +38,7 @@ class ArmErrorChecker:
         return len(errors) > 0, errors
     
     @staticmethod
-    def _check_device_error(device:Arm) -> Tuple[bool, ArmErrorStatus, Optional[Any]]:
+    def _check_device_error(check_timeout:bool,device:Arm) -> Tuple[bool, ArmErrorStatus, Optional[Any]]:
         """"get device error
         
         但是当前只判断apitimeouts，所以暂时不启用
@@ -46,8 +46,9 @@ class ArmErrorChecker:
         return bool , reason
         """
         error_info = device.get_parking_stop_detail()
-        if error_info.category == 5:
-            return True, ArmErrorStatus.ConnError, error_info.category
+        if check_timeout:
+            if error_info.category == 5:
+                return True, ArmErrorStatus.ConnError, error_info.category
         
         if error_info.category in (1,2,4,6,7):
             # specific reason in public_api_types.proto enum ParkingStopCategory

@@ -13,7 +13,6 @@ from hex_device import Arm, CommandType, Hands
 
 from hex_device_test.controllers.ErrorChecker import ArmErrorChecker
 from ..tools.plotjuggle import PlotjuggleDraw
-from ..tools.CsvLogger import CsvLogger
 
 from .BaseController import BaseController
 from .TrajectoryController import TrajectoryPlanner
@@ -21,44 +20,6 @@ from .TrajectoryController import TrajectoryPlanner
 from ..statuses.ArmProcessIPC import ArmCommChannel
 from ..statuses.ArmStatus import ArmControllerStatus,ArmErrorStatus
 from ..controllers.arm_state_machine_process import ArmControllerProcessStateMachine
-
-# class ArmStatusTracker:
-#     """
-#     设备状态表管理
-#     - 运行时间
-#     - 运行时错误（dict）
-#     - 电机温度
-#     """
-    
-#     def __init__(self, device_id: int):
-#         self.device_id = device_id
-#         self._runtime_start = time.time()
-#         self._error_history: Dict[str, str] = {}
-#         self._max_temps = [0.0] * 7
-    
-#     def update(self, device: Arm) -> None:
-#         """更新状态表"""
-#         # 更新运行时间
-#         runtime = time.time() - self._runtime_start
-        
-#         # 更新电机温度
-#         temps = device.get_temperatures() if hasattr(device, 'get_temperatures') else [0.0] * 6
-#         for i, temp in enumerate(temps[:6]):
-#             self._max_temps[i] = max(self._max_temps[i], temp)
-    
-#     def record_error(self, error_code: str, detail: str) -> None:
-#         """记录运行时错误"""
-#         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-#         self._error_history[timestamp] = f"[{error_code}] {detail}"
-    
-#     def get_summary(self) -> Dict:
-#         """生成状态摘要"""
-#         return {
-#             'device_id': self.device_id,
-#             'max_temperatures': self._max_temps.copy(),
-#             'error_count': len(self._error_history),
-#             'errors': self._error_history.copy()
-#         }
 
 class ArmStatusTable:
     def __init__(self):
@@ -137,6 +98,7 @@ class ArmControllerMp(BaseController):
                 self._enable_kcp,
                 self._device_id,
                 self._view,
+                self._check_timeout,
                 self._loop_running,
                 self._task_loop_hz,
                 self._waypoints,
@@ -157,7 +119,7 @@ class ArmControllerMp(BaseController):
         try:
             
             self._loop_running.value = False
-            self._task_process.join(timeout=10)
+            self._task_process.join(timeout=5)
             # self._task_process.join()
             # 判断进程是否存活，如果是强行杀掉
             if self._task_process.is_alive():
@@ -182,23 +144,15 @@ class ArmControllerMp(BaseController):
     
     def set_view(self, view):
         self._view = view
+        
+    def set_check_timeout(self, check):
+        self._check_timeout = check
     
     def set_arm_ipc(self,ipc):
         self._arm_ipc = ipc
         
     def set_mp_queue(self,queue):
         self._mp_queue = queue
-    
-    
-    # ==================== getting ====================
-    
-    # ===================== judge =======================
-    
-    # ==================== send =======================
-
-    
-    def publish_command(self,command_type:str,target_position):
-        pass
     
     # ==================== task ====================
     
@@ -254,6 +208,7 @@ class ArmControllerMp(BaseController):
         enable_kcp, 
         device_id, 
         view,
+        check_timeout,
         loop_running, 
         task_hz, 
         waypoints, 
@@ -265,9 +220,7 @@ class ArmControllerMp(BaseController):
         """
         # 初始化组件
         state_machine = ArmControllerProcessStateMachine(device_id,arm_ipc)
-        # status_tracker = ArmStatusTracker(device_id)
         device_state = ArmStatusTable()
-        # csv_logger = CsvLogger(device_id)
         sender = PlotjuggleDraw()
         sender.start()
         
@@ -278,10 +231,7 @@ class ArmControllerMp(BaseController):
         
         if waypoints:
             trajectory = TrajectoryPlanner(waypoints=waypoints, segment_duration=3.0)
-            # trajectory.start_trajectory()
             
-        # Home
-        
         task_interval = 1.0 / task_hz
         
         is_view = view
@@ -308,7 +258,7 @@ class ArmControllerMp(BaseController):
                         break
                     
                     # 扫描error
-                    has_error, errors= ArmErrorChecker.check_device(device)
+                    has_error, errors= ArmErrorChecker.check_device(check_timeout,device)
                     if has_error:
                         error_codes:ArmErrorStatus = [err_tuple[0] for err_tuple in errors]
                         min_error_code = min(error_codes, key=lambda x: x.value)
@@ -343,18 +293,25 @@ class ArmControllerMp(BaseController):
                     if current_state == ArmControllerStatus.Init:
                         state_machine.handle_init(device)
                         
+                        
                     elif current_state == ArmControllerStatus.Ready:
                         state_machine.handle_ready()
                         trajectory.start_trajectory()
+                        device._last_command_time = None # 根据sdk，在last_command==None时候可以发送空命令
+                        
                         
                     elif current_state == ArmControllerStatus.Running:
                         state_machine.handle_running(device, target_pos)
+                        # if device_id == 0:
+                        #     raise ValueError("test Error")
                         
                     elif current_state == ArmControllerStatus.Stopped:
                         state_machine.handle_stopped(device,last_pos)
                         
+                        
                     elif current_state == ArmControllerStatus.Brake:
                         state_machine.handle_brake(device)
+                        
                         
                     elif current_state == ArmControllerStatus.Exit:
                         state_machine.handle_exit()
@@ -384,10 +341,10 @@ class ArmControllerMp(BaseController):
                     pass
                 
                 except Exception as e:
-                    print(f"[Dev {device_id}] 循环异常: {e}")
+                    # print(f"[Dev {device_id}] 循环异常: {e}")
                     # 记录错误并尝试继续
                     arm_ipc.set_error_status(ArmErrorStatus.ProcessError.value)
-                    traceback.print_exc()
+                    # traceback.print_exc()
                     
         finally:
             pass

@@ -32,8 +32,7 @@ class ArmCoordinatorProcessStateMachine:
         ],
         ArmCoordinatorStatus.Stopped: [
             ArmCoordinatorStatus.Ready,
-            ArmCoordinatorStatus.Exit,
-            ArmCoordinatorStatus.Error
+            ArmCoordinatorStatus.Exit
         ],
         ArmCoordinatorStatus.Error: [
             ArmCoordinatorStatus.Init,
@@ -67,7 +66,7 @@ class ArmCoordinatorProcessStateMachine:
             return True
     # ========== 状态处理函数 ==========
     
-    def _handle_init(self) -> None:
+    def _handle_init(self,errors) -> None:
         """
         初始化状态处理
         - 过程：创建分控器
@@ -80,18 +79,20 @@ class ArmCoordinatorProcessStateMachine:
             for status in self._coordinator.get_all_controller_status()
         )
         
-        # any_error = any(
-        #     status == ArmControllerStatus.Brake 
-        #     for status in self._coordinator.get_all_controller_status()
-        # )
-        any_error,reason = self._coordinator.check_any_device_error()
+        # any_error,reason = self._coordinator.check_any_device_error()
+        any_error = any(errors)
+        reason = ""
+        for idx,b in enumerate(errors):
+            if b:
+                reason += f"dev{idx} {self._coordinator.get_device_error_reason(idx)} "
         
+        # auto transition
         if all_ready:
             self.transition_to(ArmCoordinatorStatus.Ready, "all device is ready")
         elif any_error:
             self.transition_to(ArmCoordinatorStatus.Error, reason)
     
-    def _handle_ready(self) -> None:
+    def _handle_ready(self,errors) -> None:
         """
         准备状态处理
         - 事件：设备上报状态为Ready
@@ -99,10 +100,14 @@ class ArmCoordinatorProcessStateMachine:
         - 转移：设备Error → Error
         """
         
-        # 检查设备错误
-        err, reason = self._coordinator.check_any_device_error()
-        if err:
+        any_error = any(errors)
+        reason = ""
+        for idx,b in enumerate(errors):
+            if b:
+                reason += f"dev{idx} {self._coordinator.get_device_error_reason(idx)} "
+        if any_error:
             self.transition_to(ArmCoordinatorStatus.Error, reason)
+            return
             
         # check cmd
         # stopped -> exit
@@ -129,7 +134,7 @@ class ArmCoordinatorProcessStateMachine:
             if all_ready:
                 self.transition_to(ArmCoordinatorStatus.Running, "开始运行")
     
-    def _handle_running(self) -> None:
+    def _handle_running(self,errors) -> None:
         """
         运行状态处理
         - 过程：执行运动
@@ -137,9 +142,14 @@ class ArmCoordinatorProcessStateMachine:
         - 转移2：协调器发布STOPPED命令 → Stopped
         """
         # 检查设备错误
-        err, reason = self._coordinator.check_any_device_error()
-        if err:
+        any_error = any(errors)
+        reason = ""
+        for idx,b in enumerate(errors):
+            if b:
+                reason += f"dev{idx} {self._coordinator.get_device_error_reason(idx)} "
+        if any_error:
             self.transition_to(ArmCoordinatorStatus.Error, reason)
+            return
         
         # 更新哪台设备异常
         
@@ -155,11 +165,11 @@ class ArmCoordinatorProcessStateMachine:
         #     return
     
         # send command
-        # if self._auto_send_cmd:
-        #     self._auto_send_cmd = False
-        #     self._coordinator.publish_command(ArmCmdStatus.RUN.value)      
+        if self._auto_send_cmd:
+            self._auto_send_cmd = False
+            self._coordinator.publish_command(ArmCmdStatus.RUN.value)      
 
-    def _handle_stopped(self) -> None:
+    def _handle_stopped(self,errors) -> None:
         """
         停止中状态处理
         - 转移1：设备均上报Exit或Ready → Ready（循环）/ Exit（结束）
@@ -172,30 +182,20 @@ class ArmCoordinatorProcessStateMachine:
         statuses = self._coordinator.get_all_controller_status()
         
         all_Exit = all(
-            # s in [ArmControllerStatus.Exit, ArmControllerStatus.Ready]
             s == ArmControllerStatus.Exit
             for s in statuses
         )
-        
-        any_error = any(
-            s == ArmControllerStatus.Brake for s in statuses
-        )
-        
-        if any_error:
-            self.transition_to(ArmCoordinatorStatus.Error, "停止过程中被刹车")
-        elif all_Exit:
-            # 根据命令决定是循环还是退出
-            if self._coordinator.has_pending_command(ArmCmdStatus.IDLE):
-                self.transition_to(ArmCoordinatorStatus.Ready, "准备下一轮")
-            else:
-                self.transition_to(ArmCoordinatorStatus.Exit, "完成退出")
+                
+                
+        if all_Exit:
+            self.transition_to(ArmCoordinatorStatus.Exit, "完成退出")
         
         # send command
         if self._auto_send_cmd:
             self._auto_send_cmd = False
             self._coordinator.publish_command(ArmCmdStatus.STOPPED.value)
     
-    def _handle_error(self) -> None:
+    def _handle_error(self,errors) -> None:
         """
         Error状态处理
         - 转移1：协调器命令Exit → Exit
@@ -204,19 +204,13 @@ class ArmCoordinatorProcessStateMachine:
         
         注：设备恢复接口仅定义，不具体实现
         """
-        # if self._coordinator.has_pending_command(ArmCmdStatus.IDLE):
-        #     # 恢复运行
-        #     self.transition_to(ArmCoordinatorStatus.Init, "恢复运行")
-        # elif self._coordinator.has_pending_command(ArmCmdStatus.STOPPED):
-        #     # 退出
-        #     self.transition_to(ArmCoordinatorStatus.Exit, "异常退出")
             
         if self._coordinator.has_pending_command(ArmCmdStatus.STOPPED):
             # 退出
-            self.transition_to(ArmCoordinatorStatus.Exit, "异常退出")
+            self.transition_to(ArmCoordinatorStatus.Stopped, "异常退出")
         # ZERO_STOPPED: 预留接口，不处理
 
-        # send command
+        # send command once
         if self._auto_send_cmd:
             self._auto_send_cmd = False
             # self._coordinator.publish_command(ArmCmdStatus.BRAKE.value)
@@ -227,7 +221,7 @@ class ArmCoordinatorProcessStateMachine:
                     self._coordinator.publish_dev_command(idx,ArmCmdStatus.BRAKE.value)
             
         
-    def _handle_exit(self) -> None:
+    def _handle_exit(self,errors) -> None:
         """
         退出状态处理
         """
@@ -238,7 +232,7 @@ class ArmCoordinatorProcessStateMachine:
     
 
         
-    def step(self) -> None:
+    def step(self,errors) -> None:
         """
         状态机步进
         """
@@ -252,7 +246,7 @@ class ArmCoordinatorProcessStateMachine:
         }
         handler = handler_map.get(self._state)
         if handler:
-            handler()
+            handler(errors)
 
 class ArmControllerProcessStateMachine:
     """
@@ -263,12 +257,12 @@ class ArmControllerProcessStateMachine:
     STATE_TRANSITIONS = {
         ArmControllerStatus.Init: [
             ArmControllerStatus.Ready,
-            ArmControllerStatus.Brake
+            ArmControllerStatus.Brake,
+            ArmControllerStatus.Exit
         ],
         ArmControllerStatus.Ready: [
             ArmControllerStatus.Brake,
             ArmControllerStatus.Running,
-            ArmControllerStatus.Stopped,
             ArmControllerStatus.Exit
             
         ],
@@ -277,11 +271,11 @@ class ArmControllerProcessStateMachine:
             ArmControllerStatus.Brake
         ],
         ArmControllerStatus.Stopped: [
-            ArmControllerStatus.Ready,
             ArmControllerStatus.Brake,
             ArmControllerStatus.Exit
         ],
         ArmControllerStatus.Brake: [
+            ArmControllerStatus.Stopped,
             ArmControllerStatus.Exit
         ],
         ArmControllerStatus.Exit: []
@@ -339,8 +333,12 @@ class ArmControllerProcessStateMachine:
             self._return_home_controller = ReturnHomeController(
                 start_position=current_pos,
                 home_position=self._home_position,
-                duration=self._return_home_duration
+                duration=self._return_home_duration/2
             )
+        
+        if self._check_cmd(ArmCmdStatus.STOPPED):
+            self.transition(ArmControllerStatus.Exit, "接收到STOPPED命令")
+            return
         
         target_position, reached_home = self._return_home_controller.get_target_position()
         if target_position is not None:
@@ -431,21 +429,11 @@ class ArmControllerProcessStateMachine:
         if hasattr(target_position,"tolist"):
             device.motor_command(CommandType.POSITION, target_position.tolist())
         
-        # # check err
-        # has_error, errors,reasons = ArmErrorChecker.check_device(device)
-        # if has_error:
-        #     self._return_home_controller = None
-        #     self._report_errors(errors)
-        #     self.transition(ArmControllerStatus.Brake, f"停止中异常: {errors,reasons}")
-        #     return
-        
         # check home
         if reached_home:
             self._return_home_controller = None
             if self._check_cmd(ArmCmdStatus.STOPPED):
                 self.transition(ArmControllerStatus.Exit, "完成退出")
-            # elif self._check_cmd(ArmCmdStatus.IDLE):
-            #     pass
         
         # check time out 
         if time.process_time() - self._stopped_time > 8.0:
@@ -462,7 +450,12 @@ class ArmControllerProcessStateMachine:
         device.motor_command(CommandType.BRAKE, [True] * device.motor_count)
         
         if self._check_cmd(ArmCmdStatus.STOPPED):
-            self.transition(ArmControllerStatus.Exit, "brake to stopped")
+            err_state = ArmErrorStatus(self._arm_ipc.get_error_status())
+            if err_state.value > ArmErrorStatus.Warning.value:
+                self.transition(ArmControllerStatus.Exit, "brake to stopped")
+            else:
+                self.transition(ArmControllerStatus.Stopped, "brake to stopped")
+                
         
     
     def handle_exit(self) -> None:
@@ -478,13 +471,3 @@ class ArmControllerProcessStateMachine:
         """检查当前命令"""
         return self._arm_ipc.get_cmd_status() == cmd.value
     
-    # def _report_errors(self, errors: List[ArmErrorChecker]) -> None:
-    #     """报告错误到共享内存"""
-    #     # 根据具体的error report
-    #     # self._arm_ipc.error_status.value = ArmErrorStatus.Error.value
-    #     error_code = min(errors, key=lambda x: x.value)
-    #     self._arm_ipc.error_status.value = error_code.value
-    #     # 记录详细错误信息
-    #     # for error in errors:
-    #     #     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    #     #     # self._arm_ipc.runtime_errors[timestamp] = error
