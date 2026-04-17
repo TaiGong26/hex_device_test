@@ -1,3 +1,4 @@
+from queue import Queue
 import os
 import csv
 import time
@@ -10,7 +11,7 @@ from ..statuses.ArmStatus import ArmControllerStatus, ArmErrorStatus
 column -s, -t ~/hex_device_log/arm_test_xxx.csv | less
 
 """
-def write_csv(mp_queue, file_path):
+def write_csv(mp_queue:Queue, file_path):
     file_path = os.path.expanduser(file_path)
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     

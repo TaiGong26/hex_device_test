@@ -31,7 +31,6 @@ class ArmCoordinatorProcessStateMachine:
             ArmCoordinatorStatus.Error
         ],
         ArmCoordinatorStatus.Stopped: [
-            ArmCoordinatorStatus.Ready,
             ArmCoordinatorStatus.Exit
         ],
         ArmCoordinatorStatus.Error: [
@@ -150,19 +149,6 @@ class ArmCoordinatorProcessStateMachine:
         if any_error:
             self.transition_to(ArmCoordinatorStatus.Error, reason)
             return
-        
-        # 更新哪台设备异常
-        
-        # stopped的转移暂时由外部执行
-        # # 检查STOPPED命令
-        # if self._coordinator.has_pending_command(ArmCmdStatus.STOPPED):
-        #     self.transition_to(ArmCoordinatorStatus.Stopped, "停止命令")
-        #     return
-        
-        # # 检查BRAKE命令
-        # if self._coordinator.has_pending_command(ArmCmdStatus.BRAKE):
-        #     self.transition_to(ArmCoordinatorStatus.Error, "紧急停止")
-        #     return
     
         # send command
         if self._auto_send_cmd:
@@ -176,8 +162,6 @@ class ArmCoordinatorProcessStateMachine:
         - 转移2：设备上报Error → Error
         """
         
-        # 执行
-        
         # check 
         statuses = self._coordinator.get_all_controller_status()
         
@@ -185,7 +169,6 @@ class ArmCoordinatorProcessStateMachine:
             s == ArmControllerStatus.Exit
             for s in statuses
         )
-                
                 
         if all_Exit:
             self.transition_to(ArmCoordinatorStatus.Exit, "完成退出")
@@ -208,7 +191,6 @@ class ArmCoordinatorProcessStateMachine:
         if self._coordinator.has_pending_command(ArmCmdStatus.STOPPED):
             # 退出
             self.transition_to(ArmCoordinatorStatus.Stopped, "异常退出")
-        # ZERO_STOPPED: 预留接口，不处理
 
         # send command once
         if self._auto_send_cmd:
@@ -301,8 +283,7 @@ class ArmControllerProcessStateMachine:
         if new_state not in self.STATE_TRANSITIONS.get(self._state, []):
             print(f"[Dev{self._dev_id}] 非法状态转换: {self._state.name} -> {new_state.name}")
             return False
-        # if new_state == ArmControllerStatus.error:
-        #     print(f"[dev] err: {reason}")
+        
         print(f"[Dev{self._dev_id}] {self._state.name} -> {new_state.name} | {reason}")
         self._state = new_state
         
@@ -333,7 +314,7 @@ class ArmControllerProcessStateMachine:
             self._return_home_controller = ReturnHomeController(
                 start_position=current_pos,
                 home_position=self._home_position,
-                duration=self._return_home_duration/2
+                duration=self._return_home_duration*0.8
             )
         
         if self._check_cmd(ArmCmdStatus.STOPPED):
@@ -376,10 +357,6 @@ class ArmControllerProcessStateMachine:
         - 转移1：发布STOPPED命令 → Stopped
         - 转移2：接收到BRAKE或发生error → Brake
         """
-        # running trajectory
-        # if trajectory:
-        #     target = trajectory.get_current_target()
-        #     device.motor_command(CommandType.POSITION, target.tolist())
         
         target = target_position
         if target is not None and hasattr(target,"tolist"):
@@ -394,12 +371,6 @@ class ArmControllerProcessStateMachine:
             self.transition(ArmControllerStatus.Brake, "接收到BRAKE命令")
             return
         
-        # # check err
-        # has_error, errors,reasons = ArmErrorChecker.check_device(device)
-        # if has_error:
-        #     self._report_errors(errors)
-        #     self.transition(ArmControllerStatus.Brake, f"检测到异常: {reasons}")
-    
     def handle_stopped(self, device: Arm, last_cmd_position:Optional[List[float]]) -> None:
         """
         Stopped状态
@@ -420,7 +391,7 @@ class ArmControllerProcessStateMachine:
             self._return_home_controller = ReturnHomeController(
                 start_position=last_cmd_position,
                 home_position=self._home_position,
-                duration=self._return_home_duration/2
+                duration=self._return_home_duration
             )
             self._stopped_time = time.process_time()
 
@@ -436,7 +407,7 @@ class ArmControllerProcessStateMachine:
                 self.transition(ArmControllerStatus.Exit, "完成退出")
         
         # check time out 
-        if time.process_time() - self._stopped_time > 8.0:
+        if time.process_time() - self._stopped_time > 10.0:
             self.transition(ArmControllerStatus.Exit, "stopped time out")
 
             
@@ -456,8 +427,6 @@ class ArmControllerProcessStateMachine:
             else:
                 self.transition(ArmControllerStatus.Stopped, "brake to stopped")
                 
-        
-    
     def handle_exit(self) -> None:
         """
         Exit状态

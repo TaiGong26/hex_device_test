@@ -8,8 +8,8 @@ from collections import deque
 import multiprocessing as mp
 # mp.set_start_method('forkserver', force=True)
 
-from hex_device import HexDeviceApi, MotorError
-from hex_device import Arm, CommandType, Hands
+from hex_device import HexDeviceApi
+from hex_device import Arm
 
 from hex_device_test.controllers.ErrorChecker import ArmErrorChecker
 from ..tools.plotjuggle import PlotjuggleDraw
@@ -70,8 +70,6 @@ class ArmStatusTable:
             "errors": self._errors.copy()
         }
 
-
-
 class ArmControllerMp(BaseController):
         
     def __init__(self, ws_url:str, local_port:int=0, enable_kcp:bool=False, task_loop_hz:int=500, device_id:int=0):
@@ -92,7 +90,7 @@ class ArmControllerMp(BaseController):
         
         try: 
             
-            self._loop_running.value = True
+            # self._loop_running= mp.Event()
             self._task_process = mp.Process(target=self._task_loop, args=(
                 self._ws_url,
                 self._enable_kcp,
@@ -118,9 +116,9 @@ class ArmControllerMp(BaseController):
     def shutdown(self):
         try:
             
-            self._loop_running.value = False
+            # self._loop_running.value = False
+            self._loop_running.set()
             self._task_process.join(timeout=5)
-            # self._task_process.join()
             # 判断进程是否存活，如果是强行杀掉
             if self._task_process.is_alive():
                 self._task_process.terminate()
@@ -237,6 +235,7 @@ class ArmControllerMp(BaseController):
         is_view = view
         target_pos = None
         motor_pos = None
+        _timeout = 0.0
         
         try:
             while not loop_running.is_set():
@@ -246,11 +245,16 @@ class ArmControllerMp(BaseController):
                         for dev in hex_api.device_list:
                             if isinstance(dev, Arm):
                                 device = dev
-                                device.reload_arm_config_from_dict(arm_config)
+                                if not device.reload_arm_config_from_dict(arm_config):
+                                    state_machine.transition(ArmControllerStatus.Exit, f"errors: device{device_id} not arm config")
+                                print(f"dev{device_id}: robot_type{device.robot_type}")
                                 break
                     
                     if device is None:
                         time.sleep(task_interval)
+                        _timeout+=task_interval
+                        # if _timeout > 3:
+                        #     state_machine.transition(ArmControllerStatus.Exit, f"errors: None Device")
                         continue
                     
                     # API退出检查
@@ -293,7 +297,6 @@ class ArmControllerMp(BaseController):
                     if current_state == ArmControllerStatus.Init:
                         state_machine.handle_init(device)
                         
-                        
                     elif current_state == ArmControllerStatus.Ready:
                         state_machine.handle_ready()
                         trajectory.start_trajectory()
@@ -302,8 +305,7 @@ class ArmControllerMp(BaseController):
                         
                     elif current_state == ArmControllerStatus.Running:
                         state_machine.handle_running(device, target_pos)
-                        # if device_id == 0:
-                        #     raise ValueError("test Error")
+                        
                         
                     elif current_state == ArmControllerStatus.Stopped:
                         state_machine.handle_stopped(device,last_pos)
@@ -333,7 +335,6 @@ class ArmControllerMp(BaseController):
                     # running state update
                     device_state.update(device.get_motor_temperatures(),device.get_motor_driver_temperatures())
                     
-                    
                     # time.sleep(task_interval)
                     time.sleep(task_interval)
                 except KeyboardInterrupt:
@@ -341,7 +342,7 @@ class ArmControllerMp(BaseController):
                     pass
                 
                 except Exception as e:
-                    # print(f"[Dev {device_id}] 循环异常: {e}")
+                    print(f"[Dev {device_id}] 循环异常: {e}")
                     # 记录错误并尝试继续
                     arm_ipc.set_error_status(ArmErrorStatus.ProcessError.value)
                     # traceback.print_exc()
@@ -349,7 +350,7 @@ class ArmControllerMp(BaseController):
         finally:
             pass
         # ================== 资源回收 ===================
-        # IPC
+        # IPC close
         if arm_ipc.cmd_recv_pipe.poll(timeout=0.01):
             value = arm_ipc.cmd_recv_pipe.recv()
         arm_ipc.cmd_recv_pipe.close()

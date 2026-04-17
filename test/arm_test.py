@@ -36,7 +36,7 @@ def main():
         '--url', 
         metavar='URL',
         nargs="+",
-        # default="ws://0.0.0.0:8439",
+        required=True,
         default=["ws://0.0.0.0:8439"],
         help='WebSocket URL for HEX device connection, example: ws://0.0.0.0:8439 or ws://[::1%%eth0]:8439'
     )
@@ -59,7 +59,7 @@ def main():
         '--timeout',
         action='store_true',
         default=False,
-        help='Enable real-time visualization of the robotic arm trajectory'
+        help='Enable API timeout check.'
     )
     
     # =============== parse args ===============

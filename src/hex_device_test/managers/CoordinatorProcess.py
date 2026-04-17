@@ -90,7 +90,7 @@ class ArmCoordinator(BaseCoordinator):
         while self._state_machine._state != ArmCoordinatorStatus.Exit:
             time.sleep(0.1)
             stopped_time+=0.1
-            if stopped_time >=15 :
+            if stopped_time >=12 :
                 break
         
         # from threading to stop controllers
@@ -108,10 +108,7 @@ class ArmCoordinator(BaseCoordinator):
             self._task.join(timeout=0.1)
             self._task = None
         
-        # 获取队列参数
-        # while not self._mp_quque.empty():
-        #     info = self._mp_quque.get()
-        #     print(info)
+        # out csv
         t = time.strftime("%Y-%m-%d %H:%M:%S")
         write_csv(self._mp_quque,f"~/hex_device_log/arm_test_{t}.csv")
         
@@ -192,7 +189,6 @@ class ArmCoordinator(BaseCoordinator):
         
         return state.name
         
-    
     # ============ callback ==============
     
     # ============ task ==============
