@@ -13,16 +13,30 @@ from hex_device_test.managers.CoordinatorProcess import ArmCoordinator
 
 # clean up
 def cleanup(coordinator):
-    print(f"cleanup")
-    coordinator.shutdown()
-    print(f"coordinator shutdown")
-    coordinator._stop_event.wait()
+    # print(f"cleanup")
+    # coordinator.shutdown()
+    # print(f"coordinator shutdown")
+    # coordinator._stop_event.wait()
+    print("cleanup")                                                                                                                                                                                                                                                                                                                   
+    # cleanup 期间屏蔽中断信号，防止机械臂返回过程中被强制终止                                                                                                                                                                                                                                                                         
+    signal.signal(signal.SIGINT, signal.SIG_IGN)                                                                                                                                                                                                                                                                                       
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)                                                                                                                                                                                                                                                                                      
+    try:                                                                                                                                                                                                                                                                                                                               
+        coordinator.shutdown()                                                                                                                                                                                                                                                                                                  
+        print("coordinator shutdown")                                                                                                                                                                                                                                                                                           
+        coordinator._stop_event.wait()                                                                                                                                                                                                                                                                                          
+    finally:                                                                                                                                                                                                                                                                                                                    
+        # 恢复默认处理（程序即将退出，主要是给子线程清理兜底）                                                                                                                                                                                                                                                                  
+        signal.signal(signal.SIGINT, signal.SIG_DFL)                                                                                                                                                                                                                                                                            
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
 # 信号处理回调
-def signal_handler(signal, frame, stop_event: threading.Event):
-    print(f"[Signal] {signal} received, exit")
+def signal_handler(sig, frame, stop_event: threading.Event):
+    print(f"[Signal] {sig} received, exit")
     stop_event.set()
-    print("----------------------------------------signal handler set stop event")
+    signal.signal(signal.SIGINT, signal.SIG_IGN)                                                                                                                                                                                                                                                                                
+    signal.signal(signal.SIGTERM, signal.SIG_IGN) 
+    print("---------------------------------- signal handler ----------------------------------")
     return
 
 def main():
@@ -120,8 +134,8 @@ def main():
         )
         
         # 信号处理
-        signal.signal(signal.SIGINT, lambda signal, frame: signal_handler(signal, frame, stop_event))
-        signal.signal(signal.SIGTERM, lambda signal, frame: signal_handler(signal, frame, stop_event))
+        signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, stop_event))
+        signal.signal(signal.SIGTERM, lambda sig, frame: signal_handler(sig, frame, stop_event))
         
         stop_event.wait()   
 
