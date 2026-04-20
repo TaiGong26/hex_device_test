@@ -1,27 +1,46 @@
 from typing import Optional, List
 import threading
 import time
+from enum import Enum
 
 
 from .BaseCoordinator import BaseCoordinator
 from ..controllers.ArmController import ArmController as Controller
-from .message_bus import arm_message_bus
+from collections import deque
+from ..tools.plotjuggle import senders
+from ..controllers.TrajectoryController import TrajectoryPlanner
+
+
+class ArmCoordinatorStatus(Enum):
+    NoneStatus = 0
+    Init = 1
+    Ready = 2
+    Running = 3
+    Stopped = 4
+    Error = 5
+    Exit = 6
 
 
 class ArmCoordinator(BaseCoordinator):
     
-    def __init__(self, device_ws_url_list: Optional[List[dict]] = None, enable_kcp: bool = False, arm_config: Optional[dict] = None, waypoints: Optional[List[dict]] = None):
+    def __init__(self, device_ws_url_list: Optional[List[dict]] = None, enable_kcp: bool = False, arm_config: Optional[dict] = None, waypoints: Optional[List[dict]] = None, enable_view: bool = False):
         super().__init__()
         
         self._coordinator_monitor_loop = None
+        self._task = None
         self._enable_kcp = enable_kcp
         self._waypoints = waypoints
+        self._enable_view = enable_view
+        # print(f"enable_view: {self._enable_view}")
+        
+        self.trajectory_player = None
         
         self.start(device_ws_url_list, enable_kcp, arm_config)
-
-        # self._message_bus = arm_message_bus
     
     def start(self, device_ws_url_list, enable_kcp, arm_config):
+        
+        senders.start()
+        
         if device_ws_url_list is None:
             print("device ip list is None")
             return False
@@ -32,49 +51,92 @@ class ArmCoordinator(BaseCoordinator):
                 ws_url=ip,
                 local_port=0,
                 enable_kcp=enable_kcp,
-                crl_hz=500,
+                task_loop_hz=100,
                 device_id=idx
             )
             self._controllers_list.append(controller)
         
         # event init
         print(f"controllers {len(self._controllers_list)}")
-        self._send_barrier = threading.Barrier(len(self._controllers_list)+1)
-        self._complete_action_barrier = threading.Barrier(len(self._controllers_list)+1)
-        
+
         # setting controllers
         for controller in self._controllers_list:
             controller.set_arm_config(arm_config)
             controller.set_waypoints(self._waypoints)
+            controller.set_view(self._enable_view)
+            # controller.set_status_callback(self._controller_status_changed)
             
-        # controllers start
+        # # controllers start
+        # res_crl_start = [False] * len(device_ws_url_list)
+        # crl_connet_queue = deque()
+        
+        # def connect_wrapper(idx, controller):
+        #   res_crl_start[idx] = controller.start()
+        
+        # for idx, controller in enumerate(self._controllers_list):
+        #     t = threading.Thread(target=connect_wrapper, args=(idx, controller))
+        #     t.start()
+        #     crl_connet_queue.append(t)
+        
+        # for t in crl_connet_queue:
+        #     t.join()
+        
+        # for idx, res in enumerate(res_crl_start):
+        #     if res == False:
+        #         print(f"controller {idx} start failed")
+        
         for controller in self._controllers_list:
             controller.start()
+            
         
-        # # # coordinator thread start
-        # self._coordinator_monitor_loop: threading.Thread = threading.Thread(target=self._monitor_loop)
-        # self._coordinator_monitor_loop.start()
+        if self._waypoints:
+            self.trajectory_player = TrajectoryPlanner(
+                waypoints=self._waypoints,
+                segment_duration=3.0
+                )
+        else:
+            print(f"[Coordinator] Not waypoints !!!!")
+            return False
+        
+        if self.trajectory_player:
+            
+            res = self.trajectory_player.start_trajectory()
+            if res:
+                print(f"[Coordinator] trajectory player start ")
+            else:
+                print(f"[Coordinator] Not waypoints failed !!!!")
+            
+            
+        self._task: threading.Thread = threading.Thread(target=self._task_loop)
+        self._task.start()
+        print(f"task  start")
     
     
     def shutdown(self):
+        senders.stop()
         
-        # controllers stop
+        # from threading to stop controllers
+        crl_shutdown_queue = deque()
         with self.controller_lock:
             for controller in self._controllers_list:
-                controller.shutdown()
+                t = threading.Thread(target=controller.shutdown)
+                t.start()
+                crl_shutdown_queue.append(t)      
+        
+        for t in crl_shutdown_queue:
+            t.join(timeout=3.0)
             
         # coordinator thread stop
         if self._coordinator_monitor_loop:
             self._coordinator_monitor_loop.join(timeout=0.1)
             self._coordinator_monitor_loop = None
             
-        # barrier break
-        self._send_barrier.abort()
-        self._complete_action_barrier.abort()
-        
-        
+        if self._task:
+            self._task.join(timeout=0.1)
+            self._task = None
+            
         self._stop_event.set()
-        print("--------------------------------coordinator shutdown")
+        print("-------------------------------- coordinator shutdown ----------------------------------")
 
     def _monitor_loop(self):
         
@@ -87,50 +149,54 @@ class ArmCoordinator(BaseCoordinator):
  
             self._stop_event.wait(timeout=1.0)
     
+    
     def _task_loop(self):
-        
-        cmd = None
-        while not self._stop_event.is_set(): # condition: controllers are running
+        try:
+            task_sleep = 0.05
+            target_position = None
+            while self._stop_event.is_set() == False: # condition: controllers are running
+                start_time = time.time()
+                
+                # =========== get target position ===========
+                if self.trajectory_player:
+                    target_position = self.trajectory_player.get_current_target().tolist()
+                
+                for controller in self._controllers_list:
+                    controller.publish_command("POSITION",target_position)
+                    # controller.send_view_data(target_position)
+                
+                end_time = time.time()
+                
+                if end_time - start_time>0.2:
+                    print("[coordinator] Time out")
+                time.sleep(task_sleep)
+        except Exception as e:
+            print(f"Err task loop: {e}")
             
-            # if self.cmd_queue.empty():
-            cmd = self.cmd_queue.get()
             
-            if cmd:
-                with self.controller_lock:
-                    for controller in self._controllers_list:
-                        isok = controller.put_command(cmd)
-                        if isok == False:
-                            print(f"[Coordinator] device {controller.get_device_id()} put command failed")
-                
-                # wait for controllers to finish
-                if self._send_barrier:
-                    self._send_barrier.wait()
-                    print("======================= all controllers execute command ============================")
-                
-                # for controller in self._controllers_list:
-                #     is_ok = controller.send_command(cmd)
-                #     if not is_ok:
-                #         print(f"[Coordinator] device {controller.get_device_id()} send command failed")
-                    
-                # wait for controllers to finish
-                if self._complete_action_barrier:
-                    self._complete_action_barrier.wait()
-                    print("======================= all controllers complete action ============================")
-                
-            # time.sleep(0.001)
-
-            # judge status and update status machine. 判断状态并决定是否进行下一次的机械臂变换
-        
     # ============ command ==============
     def publish_command(self,cmd:Optional[str] = None):
         try:
-            # self._message_bus.publish("Arm_command", cmd)
-            
             for controller in self._controllers_list:
                 controller.set_current_cmd(cmd)
             
         except Exception as e:
             print(e)
+    
+    # ============ callback ==============
+    def _controller_status_changed(self, controller_id:int, new_status:str,reason:str):
+        controllerKey = f"controller{controller_id}"
+        with self._status_lock:
+            if self._status_cache is None:
+                self._status_cache = {}
+                
+            # judge dict
+            if controllerKey not in self._status_cache:
+                self._status_cache[controllerKey] = {}
+            info = self._status_cache[controllerKey]
+            info["status"] = new_status
+            info["reason"] = reason
+            info["timestamp"] = time.time()
     
     def all_brake_command(self):
         pass

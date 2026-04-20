@@ -8,10 +8,8 @@ import sys
 
 from dataclasses import dataclass
 
-from hex_device_test.managers.Coordinator import ArmCoordinator
-
-
-
+# from hex_device_test.managers.Coordinator import ArmCoordinator
+from hex_device_test.managers.CoordinatorProcess import ArmCoordinator
 
 # clean up
 def cleanup(coordinator):
@@ -33,19 +31,12 @@ def main():
         description='Hexapod robotic arm trajectory planning and execution test',
         formatter_class=argparse.RawTextHelpFormatter
     )
-    
-    # array of device ip list
-    # parser.add_argument(
-    #     '--url', 
-    #     metavar='URL',
-    #     default="ws://0.0.0.0:8439",
-    #     help='WebSocket URL for HEX device connection, example: ws://0.0.0.0:8439 or ws://[::1%%eth0]:8439'
-    # )
+
     parser.add_argument(
         '--url', 
         metavar='URL',
         nargs="+",
-        # default="ws://0.0.0.0:8439",
+        required=True,
         default=["ws://0.0.0.0:8439"],
         help='WebSocket URL for HEX device connection, example: ws://0.0.0.0:8439 or ws://[::1%%eth0]:8439'
     )
@@ -57,10 +48,23 @@ def main():
         help='Enable KCP protocol for HEX device connection'
     )
     
+    parser.add_argument(
+        '--view',
+        action='store_true',
+        default=False,
+        help='Enable real-time visualization of the robotic arm trajectory'
+    )
+    
+    parser.add_argument(
+        '--timeout',
+        action='store_true',
+        default=False,
+        help='Enable API timeout check.'
+    )
+    
     # =============== parse args ===============
     args = parser.parse_args()
-    # print(f"args: {args}")
-    # dev_ip_list = list(args.url.split(','))
+    
     dev_ip_list = args.url
     if dev_ip_list is None or len(dev_ip_list) == 0:
         print("Error: No device IPs provided. Please specify at least one device IP using the --url argument.")
@@ -68,7 +72,8 @@ def main():
         return
     print(f"Device IP list: {dev_ip_list}")
     enable_kcp = args.KCP
-    
+    enable_view = args.view
+    check_timeout = args.timeout
     # config
     config_dict = {
         'name':'Archer_d6y',
@@ -109,21 +114,17 @@ def main():
             dev_ip_list, 
             enable_kcp, 
             arm_config=config_dict,
-            waypoints=arm_position
+            waypoints=arm_position,
+            enable_view=enable_view,
+            check_timeout=check_timeout
         )
         
         # 信号处理
         signal.signal(signal.SIGINT, lambda signal, frame: signal_handler(signal, frame, stop_event))
         signal.signal(signal.SIGTERM, lambda signal, frame: signal_handler(signal, frame, stop_event))
         
-        # publish a command
-
-        # coordinator.start()
-        
-        print(f"coordinator {coordinator}")
         stop_event.wait()   
-        # if coordinator is not None:
-        #     cleanup(coordinator)
+
     except KeyboardInterrupt:
         print("keyboard interrupt")
         
@@ -145,21 +146,6 @@ def t_thread(NUM):
     time.sleep(1)
     print(f"thread{NUM} end")
     
-def test():
-    t = threading.Thread(target=t_thread, args=(1,))
-    t2 = threading.Thread(target=t_thread, args=(2,))
-    t3 = threading.Thread(target=t_thread, args=(3,))
-    t2.start()
-    t3.start()
-    t.start()
-    t.join()
-    t2.join()
-    t3.join()
-    print("main thread end")
-    # t = None
-    # time.sleep(1)
-    # t = threading.Thread(target=t_thread)
-    # t.start()
 if __name__ == "__main__":
     main()
     # test()
