@@ -4,13 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hex_device_test"
-version = "0.1.0"
+version = "1.0.0"
+requires-python = ">=3.9"
+dependencies = [
+    "hex_device",
+]
 description = "HEX device control test"
 authors = [{name="TTG"}]
 readme = "README.md"
-requires-python = ">=3.8"
 
-
-dependencies = [
-    "numpy",
-]
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["hex_device_test*"]
+exclude = ["tests*", "test*", "*.tests"]
