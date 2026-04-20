@@ -261,8 +261,10 @@ class ArmControllerMp(BaseController):
                     if hex_api.is_api_exit():
                         break
                     
+                    connLost = hex_api.is_websocket_recv_timeout()
+                    
                     # 扫描error
-                    has_error, errors= ArmErrorChecker.check_device(check_timeout,device)
+                    has_error, errors= ArmErrorChecker.check_device(check_timeout,device,connLost)
                     if has_error:
                         error_codes:ArmErrorStatus = [err_tuple[0] for err_tuple in errors]
                         min_error_code = min(error_codes, key=lambda x: x.value)

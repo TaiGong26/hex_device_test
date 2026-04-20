@@ -11,7 +11,7 @@ class ArmErrorChecker:
     """
     
     @staticmethod
-    def check_device(check_timeout:bool,device: Arm) -> Tuple[bool, List[Tuple[ArmErrorStatus,List[Any]]]]:
+    def check_device(check_timeout:bool,device: Arm, connLost:bool) -> Tuple[bool, List[Tuple[ArmErrorStatus,List[Any]]]]:
         """
         全面检查设备状态
         返回: (has_error, error_list)
@@ -19,8 +19,16 @@ class ArmErrorChecker:
         """
         errors = []
         
+        parking_stop = device.get_parking_stop_detail()
+        
+        # 1. device connect check
+        err_conn,err_code_conn,reason_conn = ArmErrorChecker._check_connect_error(check_timeout,parking_stop,connLost)
+        if err_conn:
+            errors.append((err_code_conn,reason_conn))
+        
+        
         # 2. device error check
-        err_dev,err_code_dev,reason = ArmErrorChecker._check_device_error(check_timeout,device)
+        err_dev,err_code_dev,reason = ArmErrorChecker._check_device_error(parking_stop)
         if err_dev:
             errors.append((err_code_dev,reason))
         
@@ -38,21 +46,35 @@ class ArmErrorChecker:
         return len(errors) > 0, errors
     
     @staticmethod
-    def _check_device_error(check_timeout:bool,device:Arm) -> Tuple[bool, ArmErrorStatus, Optional[Any]]:
+    def _check_connect_error(check_timeout:bool,parking_stop,connLost:bool) -> Tuple[bool, ArmErrorStatus, Optional[Any]]:
         """"get device error
         
         但是当前只判断apitimeouts，所以暂时不启用
         
         return bool , reason
         """
-        error_info = device.get_parking_stop_detail()
         if check_timeout:
-            if error_info.category == 5:
-                return True, ArmErrorStatus.ConnError, error_info.category
+            if parking_stop.category == 5:
+                return True, ArmErrorStatus.ConnError, parking_stop.category
+            
+        if connLost:
+            return True, ArmErrorStatus.ConnError, "websocket connect Lost!"
         
-        if error_info.category in (1,2,4,6,7):
+        return False, ArmErrorStatus.Normal, None
+    
+    @staticmethod
+    def _check_device_error(parking_stop:Arm) -> Tuple[bool, ArmErrorStatus, Optional[Any]]:
+        """"get device error
+        
+        但是当前只判断apitimeouts，所以暂时不启用
+        
+        return bool , reason
+        """
+        parking_stop
+        
+        if parking_stop.category in (1,2,4,6,7):
             # specific reason in public_api_types.proto enum ParkingStopCategory
-            return True, ArmErrorStatus.ArmError, error_info.category
+            return True, ArmErrorStatus.ArmError, parking_stop.category
         
         return False, ArmErrorStatus.Normal, None
     
@@ -79,5 +101,10 @@ class ArmErrorChecker:
                 for idx, reason in enumerate(reason)
                 if reason is not None)
                 
-        elif code in (ArmErrorStatus.ConnError, ArmErrorStatus.ArmError):
+        elif code == ArmErrorStatus.ArmError:
             return public_api_types_pb2.ParkingStopCategory.Name(reason)
+        elif code == ArmErrorStatus.ConnError:
+            if isinstance(reason,int):
+                return public_api_types_pb2.ParkingStopCategory.Name(reason)
+            elif isinstance(reason,str):
+                return reason
