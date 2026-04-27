@@ -230,7 +230,7 @@ class ArmControllerMp(BaseController):
         trajectory = None
         
         if waypoints:
-            trajectory = TrajectoryPlanner(waypoints=waypoints, segment_duration=3.0)
+            trajectory = TrajectoryPlanner(waypoints=waypoints, segment_duration=2.5)
             
         task_interval = 1.0 / task_hz
         
