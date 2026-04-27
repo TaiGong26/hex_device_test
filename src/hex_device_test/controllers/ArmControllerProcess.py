@@ -239,6 +239,7 @@ class ArmControllerMp(BaseController):
         motor_pos = None
         _timeout = 0.0
         loop_counter = 0
+        prev_segment_index = None
         
         try:
             while not loop_running.is_set():
@@ -311,14 +312,14 @@ class ArmControllerMp(BaseController):
                     elif current_state == ArmControllerStatus.Running:
                         state_machine.handle_running(device, target_pos)
                         segment_info = trajectory.get_current_segment_info()
+                        
+                        # check loop
                         if int(segment_info['total_elapsed'] * 10) % 5 == 0:  # Print every 0.5 seconds
-                            # print(f"Path segment: {segment_info['segment_index']} -> {(segment_info['segment_index'] + 1) % len(arm_position)}")
-                            # print(f"Segment progress: {segment_info['segment_progress']:.2f}")
-                            # print(f"Target position: {[f'{x:.3f}' for x in target_positions]}")
-                            
-                            # Check if a complete loop has been completed
-                            if segment_info['segment_index'] == 0 and segment_info['segment_progress'] < 0.1:
-                                loop_counter += 1
+                            if prev_segment_index is not None:
+                                if segment_info['segment_index'] == 0 and prev_segment_index != 0:
+                                    loop_counter += 1
+
+                            prev_segment_index = segment_info['segment_index']
                         
                     elif current_state == ArmControllerStatus.Stopped:
                         state_machine.handle_stopped(device,last_pos)
