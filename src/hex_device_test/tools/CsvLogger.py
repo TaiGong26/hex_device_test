@@ -23,10 +23,10 @@ def write_csv(mp_queue:Queue, file_path):
 
             for device_id, data in info.items():
                 row = {
-                    "timestamp": time.time(),
+                    "run_time": data["run_time"],
                     "device_id": device_id,
                     "state": data["state"],
-                    "run_time": data["run_time"],
+                    "loop_counter": data["loop_counter"],
                 }
 
                 # 展开电机温度

@@ -57,5 +57,5 @@ python --view --timeout --url ws://xx.xx.xx.xx:8439
 * 专为内部耐久性测试设计
 * 依赖 hex_device 运行环境
 * 运行测试前请确保设备连接正常
-
+* 其他的问题在[Q&A](./docs/Q&A.md)
 ---

@@ -20,6 +20,7 @@ from .TrajectoryController import TrajectoryPlanner
 from ..statuses.ArmProcessIPC import ArmCommChannel
 from ..statuses.ArmStatus import ArmControllerStatus,ArmErrorStatus
 from ..controllers.arm_state_machine_process import ArmControllerProcessStateMachine
+from datetime import timedelta
 
 class ArmStatusTable:
     def __init__(self):
@@ -64,7 +65,8 @@ class ArmStatusTable:
 
         return {
             "state": self._state.name,
-            "run_time": self._run_time,
+            # "run_time": self._run_time,
+            "run_time": str(timedelta(seconds=int(self._run_time))),
             "motor_max_temperature": motor_temps,
             "motor_driver_max_temperature": dev_temps,
             "errors": self._errors.copy()
@@ -228,7 +230,7 @@ class ArmControllerMp(BaseController):
         trajectory = None
         
         if waypoints:
-            trajectory = TrajectoryPlanner(waypoints=waypoints, segment_duration=3.0)
+            trajectory = TrajectoryPlanner(waypoints=waypoints, segment_duration=2.5)
             
         task_interval = 1.0 / task_hz
         
@@ -236,6 +238,8 @@ class ArmControllerMp(BaseController):
         target_pos = None
         motor_pos = None
         _timeout = 0.0
+        loop_counter = 0
+        prev_segment_index = None
         
         try:
             while not loop_running.is_set():
@@ -307,7 +311,15 @@ class ArmControllerMp(BaseController):
                         
                     elif current_state == ArmControllerStatus.Running:
                         state_machine.handle_running(device, target_pos)
+                        segment_info = trajectory.get_current_segment_info()
                         
+                        # check loop
+                        if int(segment_info['total_elapsed'] * 10) % 5 == 0:  # Print every 0.5 seconds
+                            if prev_segment_index is not None:
+                                if segment_info['segment_index'] == 0 and prev_segment_index != 0:
+                                    loop_counter += 1
+
+                            prev_segment_index = segment_info['segment_index']
                         
                     elif current_state == ArmControllerStatus.Stopped:
                         state_machine.handle_stopped(device,last_pos)
@@ -360,6 +372,10 @@ class ArmControllerMp(BaseController):
         # report
         report = {}
         report[device_id] = device_state.get_summary()
+        report[device_id].update({
+            "loop_counter":loop_counter,
+            
+        })
         mp_queue.put(report)
         
         hex_api.close()
