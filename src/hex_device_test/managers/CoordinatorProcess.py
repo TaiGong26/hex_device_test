@@ -63,7 +63,6 @@ class ArmCoordinator(BaseCoordinator):
             controller.set_arm_ipc(device_ipc)
             self._controllers_list.append(controller)
         
-        # event init
         print(f"controllers {len(self._controllers_list)}")
 
         self._error_flag = [False] * len(self._controllers_list)
@@ -74,7 +73,6 @@ class ArmCoordinator(BaseCoordinator):
             controller.set_view(self._enable_view)
             controller.set_check_timeout(self._check_timeout)
             controller.set_mp_queue(self._mp_quque)
-            # controller.set_status_callback(self._controller_status_changed)
         
         for controller in self._controllers_list:
             controller.start()
@@ -83,9 +81,9 @@ class ArmCoordinator(BaseCoordinator):
         self._task.start()
     
     def shutdown(self):
-        # 更新状态为stoped
+
         self._state_machine.transition_to(ArmCoordinatorStatus.Stopped, "shutdown")
-        # wait exit status
+
         stopped_time = 0
         while self._state_machine._state != ArmCoordinatorStatus.Exit:
             time.sleep(0.1)
@@ -93,7 +91,6 @@ class ArmCoordinator(BaseCoordinator):
             if stopped_time >=12 :
                 break
         
-        # from threading to stop controllers
         crl_shutdown_queue = deque()
         with self.controller_lock:
             for controller in self._controllers_list:
@@ -189,8 +186,6 @@ class ArmCoordinator(BaseCoordinator):
         
         return state.name
         
-    # ============ callback ==============
-    
     # ============ task ==============
     
     def _task_loop(self) -> None:
@@ -225,5 +220,4 @@ class ArmCoordinator(BaseCoordinator):
             if error_status != ArmErrorStatus.Normal and not self._error_flag[device_id]:
                 self._error_flag[device_id] = True
                 print(f"[dev{device_id}] is error, reason{error_status.name}")
-                # if self._state_machine._state != ArmCoordinatorStatus.Error:
-                #     self._state_machine.transition_to(ArmCoordinatorStatus.Error,"get device error status")
+
