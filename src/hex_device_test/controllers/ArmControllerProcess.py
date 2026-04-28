@@ -65,7 +65,6 @@ class ArmStatusTable:
 
         return {
             "state": self._state.name,
-            # "run_time": self._run_time,
             "run_time": str(timedelta(seconds=int(self._run_time))),
             "motor_max_temperature": motor_temps,
             "motor_driver_max_temperature": dev_temps,
@@ -92,7 +91,6 @@ class ArmControllerMp(BaseController):
         
         try: 
             
-            # self._loop_running= mp.Event()
             self._task_process = mp.Process(target=self._task_loop, args=(
                 self._ws_url,
                 self._enable_kcp,
@@ -118,16 +116,13 @@ class ArmControllerMp(BaseController):
     def shutdown(self):
         try:
             
-            # self._loop_running.value = False
             self._loop_running.set()
             self._task_process.join(timeout=5)
-            # 判断进程是否存活，如果是强行杀掉
+            
             if self._task_process.is_alive():
                 self._task_process.terminate()
                 self._task_process.join()
-            
               
-            # print(f"[Controller {self._device_id}]: ------------------------------------ shutdown complete ------------------------------------")
         except RuntimeError as e:
             print(f"[Controller {self._device_id}, RuntimeError]: {e}")
         
@@ -172,21 +167,17 @@ class ArmControllerMp(BaseController):
         device_key = f"dev{device_id}"
         data = {}
 
-        # 当前值
         if current_position is not None and hasattr(current_position,"tolist"):
             current_position = current_position.tolist()
 
-        # 展开 motor_position
         if current_position is not None:
             for i, v in enumerate(current_position):
                 data[f"{device_key}/motor_position/joint{i}"] = float(v)
 
-        # 展开 target_position
         if target_position is not None:
             for i, v in enumerate(target_position):
                 data[f"{device_key}/target_position/joint{i}"] = float(v)
 
-        # 标量
         if status_mathine is not None:
             data[f"{device_key}/status"] = status_mathine
         if ssid is not None:
@@ -201,7 +192,6 @@ class ArmControllerMp(BaseController):
             data[f"{device_key}/error_code"] = error_code
 
         sender.add_data(data)
-        # sender.send_json(data)
     
     def _task_loop(self, 
         ws_url, 
@@ -257,8 +247,6 @@ class ArmControllerMp(BaseController):
                     if device is None:
                         time.sleep(task_interval)
                         _timeout+=task_interval
-                        # if _timeout > 3:
-                        #     state_machine.transition(ArmControllerStatus.Exit, f"errors: None Device")
                         continue
                     
                     # API退出检查
@@ -349,18 +337,14 @@ class ArmControllerMp(BaseController):
                     # running state update
                     device_state.update(device.get_motor_temperatures(),device.get_motor_driver_temperatures())
                     
-                    # time.sleep(task_interval)
                     time.sleep(task_interval)
-                except KeyboardInterrupt:
-                    # break
-                    pass
                 
                 except Exception as e:
                     print(f"[Dev {device_id}] 循环异常: {e}")
-                    # 记录错误并尝试继续
                     arm_ipc.set_error_status(ArmErrorStatus.ProcessError.value)
-                    # traceback.print_exc()
-                    
+                
+                except KeyboardInterrupt:
+                    pass
         finally:
             pass
         # ================== 资源回收 ===================
