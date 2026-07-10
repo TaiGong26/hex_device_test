@@ -2,7 +2,6 @@ import threading
 import time
 from typing import List,Optional
 
-from ..managers.Coordinator import ArmCoordinatorStatus
 from ..statuses.ArmProcessIPC import ArmCommChannel
 from ..statuses.ArmStatus import ArmControllerStatus, ArmCoordinatorStatus, ArmErrorStatus,ArmCmdStatus
 from  ..controllers.ErrorChecker import ArmErrorChecker
