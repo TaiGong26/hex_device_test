@@ -133,7 +133,6 @@ class ArmControllerMpV2(BaseController):
 
             while not self._loop_running.is_set():
                 try:
-                    self.error_check()
 
                     # ── 设备未发现：累计超时 + 睡眠 + 跳过 ──
                     if self._device is None:
@@ -145,11 +144,15 @@ class ArmControllerMpV2(BaseController):
                         time.sleep(self._task_interval)
                         continue
 
+
+                    self.error_check()
+                    
                     self.state_update()
 
-                    if self._exit_requested:
-                        break
+                    # if self._exit_requested:
+                    #     break
 
+                    # 
                     self.run_tick()
                     time.sleep(self._task_interval)
 
@@ -158,15 +161,17 @@ class ArmControllerMpV2(BaseController):
                     pass
 
                 except Exception as e:
-                    self._consecutive_errors += 1
-                    print(f"[Dev {self._device_id}] loop exception: {e}")
-                    traceback.print_exc()
-                    # 保留旧版 IPC 错误信号，让 Coordinator 能感知子进程异常
-                    if self._arm_ipc is not None:
-                        self._arm_ipc.set_error_status(ArmErrorStatus.ProcessError.value)
-                    if self._consecutive_errors >= self._max_consecutive_errors:
-                        print(f"[Dev {self._device_id}] too many consecutive errors, exit")
-                        break
+                    # self._consecutive_errors += 1
+                    # print(f"[Dev {self._device_id}] loop exception: {e}")
+                    # traceback.print_exc()
+                    # if self._arm_ipc is not None:
+                    #     self._arm_ipc.set_error_status(ArmErrorStatus.ProcessError.value)
+                    # if self._consecutive_errors >= self._max_consecutive_errors:
+                    #     print(f"[Dev {self._device_id}] too many consecutive errors, exit")
+                    #     break
+                    print(f"[Dev {self._device_id}] 循环异常: {e}")
+                    self._arm_ipc.set_error_status(ArmErrorStatus.ProcessError.value)
+                
         finally:
             self._close()
 
@@ -187,6 +192,10 @@ class ArmControllerMpV2(BaseController):
         self._consecutive_errors = 0
         self._exit_requested = False
         self._loop_initialized = False
+        
+        # 组件
+        self._temp_csv_file = None
+        self._temp_csv_writer = None
 
     def init_mod(self):
         """模块创建（状态机 / API / 轨迹 / CSV / 可视化）"""
@@ -242,8 +251,7 @@ class ArmControllerMpV2(BaseController):
                 )
 
         # CSV 日志文件（header 推迟到 error_check 发现设备后写入）
-        self._temp_csv_file = None
-        self._temp_csv_writer = None
+
         if self._temp_csv_dir:
             os.makedirs(self._temp_csv_dir, exist_ok=True)
             start_ts = time.strftime("%Y-%m-%d_%H-%M-%S")
@@ -353,8 +361,6 @@ class ArmControllerMpV2(BaseController):
             self._device._last_command_time = None
 
         elif current_state == ArmControllerStatus.Running:
-            # ⚠️ _target_pos 由上一个 tick 的 run_tick() 计算
-            # 这引入 ~1 frame（~2ms @ 500Hz）延迟，机械上无感知
             self._state_machine.handle_running(self._device, self._target_pos)
             if self._trajectory:
                 self._update_loop_count()
@@ -385,7 +391,6 @@ class ArmControllerMpV2(BaseController):
         轨迹目标计算 + 温度采集 + CSV 日志 + 可视化
 
         _target_pos 在本 tick 计算，供下一个 tick 的 state_update() 使用。
-        这是与旧代码的时序差异——旧代码 target_pos 在 state machine 之前计算。
         """
         # ── 1. 轨迹目标 + 电机位置 ──
         self._target_pos = (self._trajectory.get_current_target()

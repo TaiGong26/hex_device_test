@@ -3,7 +3,7 @@ ArmCoordinatorV2 — 重构版协调器
 
 关键变化：
   - 无 setter 阶段：Controller 构造时注入全部配置
-  - 移除 write_csv 到硬编码路径（/home/tl/ssd/...），改为 stdout 打印最终报告
+  - write_csv 改用 temp_csv_dir 参数，不依赖硬编码路径
   - 串行 shutdown（比旧版并发 shutdown 更可靠）
   - IPC 架构不变：Pipe + mp.Value
 """
@@ -13,9 +13,11 @@ from typing import Optional, List, Dict
 import threading
 import time
 import multiprocessing as mp
+import os
 from collections import deque
 
 from .BaseCoordinator import BaseCoordinator
+from ..tools.CsvLogger import write_csv
 from ..controllers.ArmControllerMpV2 import ArmControllerMpV2 as Controller
 from ..controllers.arm_state_machine_process import ArmCoordinatorProcessStateMachine
 from ..statuses.ArmStatus import ArmCmdStatus, ArmCoordinatorStatus, ArmControllerStatus, ArmErrorStatus
@@ -122,7 +124,7 @@ class ArmCoordinatorV2(BaseCoordinator):
 
         相比旧版的变化：
           - 串行 shutdown（旧版为每个 controller 创建独立线程并发 shutdown）
-          - Phase 4：drain mp_queue 并 stdout 打印，替代 write_csv 硬编码路径
+          - Phase 4：drain mp_queue 并 write_csv 到 temp_csv_dir
         """
         # Phase 1: 状态机 → Stopped
         self._state_machine.transition_to(ArmCoordinatorStatus.Stopped, "shutdown")
@@ -135,7 +137,7 @@ class ArmCoordinatorV2(BaseCoordinator):
             if stopped_time >= 12:
                 break
 
-        # Phase 3: 并发 shutdown 所有 Controller（旧 CoordinatorProcess.py 模式）
+        # Phase 3: 并发 shutdown
         shutdown_threads = []
         with self.controller_lock:
             for controller in self._controllers_list:
@@ -144,33 +146,17 @@ class ArmCoordinatorV2(BaseCoordinator):
                 shutdown_threads.append(t)
         for t in shutdown_threads:
             t.join(timeout=5.0)
-
-        # Phase 4: drain mp_queue 并打印最终报告
-        # 旧版 write_csv 写入 /home/tl/ssd/docker_link/...（硬编码路径），
-        # 新版改为 stdout 输出，不依赖特定文件系统路径
-        print("[Coordinator] final reports:")
-        while not self._mp_queue.empty():
-            try:
-                report = self._mp_queue.get_nowait()
-                for dev_id, info in report.items():
-                    print(f"  dev{dev_id}: state={info.get('state')}, "
-                          f"loop_counter={info.get('loop_counter')}, "
-                          f"run_time={info.get('run_time')}")
-                    motor_temps = info.get("motor_max_temperature")
-                    if motor_temps:
-                        temps_str = ", ".join(f"{t:.1f}" for t in motor_temps)
-                        print(f"          motor_max_temps=[{temps_str}]")
-                    errors = info.get("errors")
-                    if errors:
-                        for err in errors:
-                            print(f"          error: {err}")
-            except Exception:
-                break
-
-        # Phase 5: 清理
+            
+        # Phase 4: 清理
         if self._task:
             self._task.join(timeout=0.1)
             self._task = None
+
+        # Phase 5: controller 写入 CSV 文件
+        CSV_PATH = f"/home/tl/ssd/docker_link/python/hex_device_test/log/arm_test_{t}.csv"
+        t = time.strftime("%Y-%m-%d %H:%M:%S")
+        write_csv(self._mp_quque,CSV_PATH)
+        print(f"[Coordinator] report written to {CSV_PATH}")
 
         self._ipc_clean()
         self._mp_queue.close()
@@ -236,7 +222,7 @@ class ArmCoordinatorV2(BaseCoordinator):
 
     def has_pending_command(self, cmd: ArmCmdStatus) -> bool:
         """检查是否所有设备都收到了指定命令"""
-        return all(
+        return any(
             ipc.get_cmd_status() == cmd.value
             for ipc in self._arm_ipc.get_ipc_dict().values()
         )
@@ -245,7 +231,7 @@ class ArmCoordinatorV2(BaseCoordinator):
         """获取指定设备的错误原因"""
         arm_ipc = self._arm_ipc.get_device_ipc(dev_id)
         if arm_ipc is None:
-            return "Unknown"
+            return "[From Coordinator]: 没有设备IPC通道, 无法查询"
         state = ArmErrorStatus(arm_ipc.get_error_status())
         return state.name
 
