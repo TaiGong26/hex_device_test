@@ -135,9 +135,15 @@ class ArmCoordinatorV2(BaseCoordinator):
             if stopped_time >= 12:
                 break
 
-        # Phase 3: 串行 shutdown 所有 Controller
-        for controller in self._controllers_list:
-            controller.shutdown()
+        # Phase 3: 并发 shutdown 所有 Controller（旧 CoordinatorProcess.py 模式）
+        shutdown_threads = []
+        with self.controller_lock:
+            for controller in self._controllers_list:
+                t = threading.Thread(target=controller.shutdown)
+                t.start()
+                shutdown_threads.append(t)
+        for t in shutdown_threads:
+            t.join(timeout=5.0)
 
         # Phase 4: drain mp_queue 并打印最终报告
         # 旧版 write_csv 写入 /home/tl/ssd/docker_link/...（硬编码路径），
