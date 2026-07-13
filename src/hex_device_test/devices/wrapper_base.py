@@ -3,13 +3,54 @@
 设计意图：
 Controller 代码不直接调用 hex_device 或 hex_driver_robot，通过此抽象基类
 收拢所有设备操作。切换底层驱动时只需换一个后端实现类。
+
+日志说明：
+- wrapper 自身使用 print 输出（前缀 [ArcherY6]），不依赖 logging 模块
+- 底层后端（如 BackendHexDevice）可通过 __init__ 传入的 logger 自行记录
 """
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+
+from hex_driver_robot.base import HexRobotBaseParams
+from hex_driver_robot.tcp_base.generated.public_api_types_pb2 import (
+    RobotType as _RobotType,
+    SecondaryDeviceType as _SecondaryDeviceType,
+)
+
+ARM_INFO_MAP = {
+    "Archer_y6": {
+        "robot_type": _RobotType.RtArmArcherY6_H1,
+        "motor_count": 6,
+    },
+    "Firefly_y6": {
+        "robot_type": _RobotType.RtArmFireflyY6_H1,
+        "motor_count": 6,
+    },
+}
+
+GRIP_INFO_MAP = {
+    "gp80": {
+        "robot_type": _SecondaryDeviceType.SdtHandGp80G1,
+        "motor_count": 1,
+    },
+    "gp100": {
+        "robot_type": _SecondaryDeviceType.SdtHandGp100,
+        "motor_count": 1,
+    },
+}
+
+@dataclass
+class WrapperParams:
+    enable_kcp:     bool        = True
+    log_level:      str         = "DEBUG"
+    grip_type:      str         = "empty"
+    robot_name:     str         = "Archer_y6"
+    
 
 class WrapperBase(ABC):
     """设备操作抽象基类
@@ -19,10 +60,28 @@ class WrapperBase(ABC):
         _robot     — 设备实例（Arm）
         _robot_type: int
         _dof: int  — 电机数量
+        _logger    — 可选，传给后端使用（wrapper 自身不用）
 
     生命周期：
         start() → [discover_device] → [command/read]* → shutdown()
     """
+
+    def __init__(self, logger: Optional[Any] = None):
+        self._logger = logger  # 后端使用
+
+    # ── 日志（wrapper 使用 print，不依赖 logging）──
+
+    def _log_info(self, msg: str) -> None:
+        print(f"[Arm] {msg}")
+
+    def _log_warn(self, msg: str) -> None:
+        print(f"\033[33m[Arm] {msg}\033[0m")
+
+    def _log_err(self, msg: str) -> None:
+        print(f"\033[31m[Arm] {msg}\033[0m")
+
+    def _log_debug(self, msg: str) -> None:
+        print(f"\033[34m[Arm] {msg}\033[0m")
 
     # ── 生命周期 ──
 
@@ -41,17 +100,6 @@ class WrapperBase(ABC):
         """发现或创建 Arm 设备实例，设置 _robot / _robot_type / _dof"""
 
     # ── 属性 ──
-
-    @property
-    @abstractmethod
-    def motor_count(self) -> int:
-        """电机数量（_dof）"""
-
-    @property
-    @abstractmethod
-    def robot_type(self) -> int:
-        """机器人类型枚举值"""
-
     @property
     @abstractmethod
     def raw_device(self) -> Optional[Any]:
