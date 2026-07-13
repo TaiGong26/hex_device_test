@@ -22,6 +22,11 @@ from hex_driver_robot.tcp_base.generated.public_api_types_pb2 import (
     SecondaryDeviceType as _SecondaryDeviceType,
 )
 
+ARM_ROBOT_TYPE_MAP = {
+    "Archer_y6": _RobotType.RtArmArcherY6_H1,
+    "Firefly_y6": _RobotType.RtArmFireflyY6_H1,
+}
+
 ARM_INFO_MAP = {
     "Archer_y6": {
         "robot_type": _RobotType.RtArmArcherY6_H1,
@@ -45,7 +50,7 @@ GRIP_INFO_MAP = {
 }
 
 @dataclass
-class WrapperParams:
+class WrapperParams(HexRobotBaseParams):
     enable_kcp:     bool        = True
     log_level:      str         = "DEBUG"
     grip_type:      str         = "empty"
@@ -93,12 +98,6 @@ class WrapperBase(ABC):
     def shutdown(self):
         """释放所有资源"""
 
-    # ── 设备发现 / 配置 ──
-
-    @abstractmethod
-    def discover_device(self, arm_config: Optional[dict] = None) -> bool:
-        """发现或创建 Arm 设备实例，设置 _robot / _robot_type / _dof"""
-
     # ── 属性 ──
     @property
     @abstractmethod
@@ -144,16 +143,9 @@ class WrapperBase(ABC):
     # ── 控制命令 ──
 
     @abstractmethod
-    def motor_command_position(self, target: Any) -> None:
+    def motor_command(self, target: Any) -> None:
         """发送位置控制命令"""
 
-    @abstractmethod
-    def motor_command_brake(self) -> None:
-        """发送刹车命令"""
-
-    @abstractmethod
-    def motor_start(self) -> None:
-        """启动电机"""
 
     @abstractmethod
     def reset_last_command_time(self) -> None:
