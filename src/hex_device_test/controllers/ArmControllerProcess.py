@@ -10,7 +10,7 @@ import csv
 import os
 # mp.set_start_method('forkserver', force=True)
 
-from hex_device import HexDeviceApi
+from hex_device import Hands, HexDeviceApi
 from hex_device import Arm
 
 from hex_device_test.controllers.ErrorChecker import ArmErrorChecker
@@ -32,10 +32,14 @@ class ArmStatusTable:
         self._run_time = 0.0
         self._motor_max_temps = None
         self._driver_max_temps = None
+        self._hands_motor_max_temps = None
+        self._hands_driver_max_temps = None
         self._errors = deque(maxlen=10)
         self._error_set = set()
 
-    def update(self, motor_temps:Optional[np.ndarray], driver_temps:Optional[np.ndarray]):
+    def update(self, motor_temps:Optional[np.ndarray], driver_temps:Optional[np.ndarray],
+               hands_motor_temps:Optional[np.ndarray] = None,
+               hands_driver_temps:Optional[np.ndarray] = None):
         self._run_time = time.time() - self._start_time
 
         if motor_temps is not None:
@@ -52,6 +56,20 @@ class ArmStatusTable:
             else:
                 np.maximum(self._driver_max_temps, driver_temps, out=self._driver_max_temps)
 
+        if hands_motor_temps is not None:
+            hands_motor_temps = np.asarray(hands_motor_temps, dtype=float)
+            if self._hands_motor_max_temps is None:
+                self._hands_motor_max_temps = hands_motor_temps.copy()
+            else:
+                np.maximum(self._hands_motor_max_temps, hands_motor_temps, out=self._hands_motor_max_temps)
+
+        if hands_driver_temps is not None:
+            hands_driver_temps = np.asarray(hands_driver_temps, dtype=float)
+            if self._hands_driver_max_temps is None:
+                self._hands_driver_max_temps = hands_driver_temps.copy()
+            else:
+                np.maximum(self._hands_driver_max_temps, hands_driver_temps, out=self._hands_driver_max_temps)
+
     def set_error(self, state, error_msg: str):
         key = (state,error_msg)
         if key in self._error_set:
@@ -65,12 +83,16 @@ class ArmStatusTable:
     def get_summary(self):
         motor_temps = self._motor_max_temps.tolist() if hasattr(self._motor_max_temps,"tolist") else None
         dev_temps =  self._driver_max_temps.tolist() if hasattr( self._driver_max_temps,"tolist") else None
+        hands_motor_temps = self._hands_motor_max_temps.tolist() if hasattr(self._hands_motor_max_temps,"tolist") else None
+        hands_dev_temps =  self._hands_driver_max_temps.tolist() if hasattr( self._hands_driver_max_temps,"tolist") else None
 
         return {
             "state": self._state.name,
             "run_time": str(timedelta(seconds=int(self._run_time))),
             "motor_max_temperature": motor_temps,
             "motor_driver_max_temperature": dev_temps,
+            "hands_motor_max_temperature": hands_motor_temps,
+            "hands_driver_max_temperature": hands_dev_temps,
             "errors": self._errors.copy()
         }
 
@@ -251,6 +273,8 @@ class ArmControllerMp(BaseController):
         # 初始化设备
         hex_api = HexDeviceApi(ws_url=ws_url, local_port=0, enable_kcp=enable_kcp)
         device = None
+        hands:Optional[Hands] = None
+        
         trajectory = None
         
         if waypoints:
@@ -317,6 +341,16 @@ class ArmControllerMp(BaseController):
                                 print(f"dev{device_id}: robot_type{device.robot_type}")
                                 break
                     
+                    if hands is None:
+                        for hand in hex_api.optional_device_list:
+                            if isinstance(device, Hands):
+                                hands = hand
+                                if hands.has_new_data():
+                                    if hands_first_time:
+                                        hands_first_time = False
+                                        
+                                        
+                                        
                     if device is None:
                         time.sleep(task_interval)
                         _timeout+=task_interval
@@ -329,7 +363,7 @@ class ArmControllerMp(BaseController):
                     connLost = hex_api.is_websocket_recv_timeout()
                     
                     # 扫描error
-                    has_error, errors= ArmErrorChecker.check_device(check_timeout,device,connLost)
+                    has_error, errors= ArmErrorChecker.check_device(check_timeout,device,connLost, hands)
                     if has_error:
                         error_codes:ArmErrorStatus = [err_tuple[0] for err_tuple in errors]
                         min_error_code = min(error_codes, key=lambda x: x.value)
@@ -371,7 +405,7 @@ class ArmControllerMp(BaseController):
                         
                         
                     elif current_state == ArmControllerStatus.Running:
-                        state_machine.handle_running(device, target_pos)
+                        state_machine.handle_running(device, target_pos, hands)
                         segment_info = trajectory.get_current_segment_info()
                         
                         # check loop
@@ -410,7 +444,9 @@ class ArmControllerMp(BaseController):
                     # running state update
                     motor_temps = device.get_motor_temperatures()
                     driver_temps = device.get_motor_driver_temperatures()
-                    device_state.update(motor_temps, driver_temps)
+                    hands_motor_temps = hands.get_motor_temperatures() if hands is not None else None
+                    hands_driver_temps = hands.get_motor_driver_temperatures() if hands is not None else None
+                    device_state.update(motor_temps, driver_temps, hands_motor_temps, hands_driver_temps)
                     
                     # 每 ~1 秒记录一次电机温度到 CSV（基于实际时间间隔）
                     if temp_csv_writer is not None:

@@ -8,6 +8,9 @@ class ArmErrorStatus(Enum):
     ArmError         = 4
     ConnError        = 5
     OtherError       = 6
+    HandsError       = 7
+    
+
 
 class ArmCmdStatus(Enum):
     IDLE = 0

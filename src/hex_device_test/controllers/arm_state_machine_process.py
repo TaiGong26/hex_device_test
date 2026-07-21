@@ -1,3 +1,4 @@
+import math
 import threading
 import time
 from typing import List,Optional
@@ -350,17 +351,34 @@ class ArmControllerProcessStateMachine:
         
         # 发送空命令，防止apiTimeout
     
-    def handle_running(self, device: Arm, target_position:Optional[List[float]]) -> None:
+    def handle_running(self, device: Arm, target_position:Optional[List[float]], hands:Optional[Hands]) -> None:
         """
         Running状态
         - 执行：执行轨迹
         - 转移1：发布STOPPED命令 → Stopped
         - 转移2：接收到BRAKE或发生error → Brake
         """
-        
+        # #### device target
         target = target_position
         if target is not None and hasattr(target,"tolist"):
             device.motor_command(CommandType.POSITION, target.tolist())
+            
+        # #### hands target
+        if hands is not None:
+            pos_range = hands.get_joint_limits()
+            min_pos = pos_range[0]
+            max_pos = pos_range[1]
+            
+            t = time.time()
+            interpolation_factor = (math.sin(t * 0.5) + 1.0) / 2.0  # 0 to 1
+            target_position = min_pos + interpolation_factor * (max_pos - min_pos)
+            # Apply to first motor (or all motors if desired)
+            target_positions = [target_position] + [0.0] * (hands.motor_count - 1)
+            
+            hands.motor_command(
+                CommandType.POSITION,
+                target_positions
+            )
         
         # check cmd
         if self._check_cmd(ArmCmdStatus.STOPPED):

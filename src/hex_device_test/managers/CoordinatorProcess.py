@@ -15,7 +15,7 @@ from ..tools.CsvLogger import write_csv
 
 class ArmCoordinator(BaseCoordinator):
     
-    def __init__(self, device_ws_url_list: Optional[List[dict]] = None, enable_kcp: bool = False, arm_config: Optional[dict] = None, waypoints: Optional[List[dict]] = None, segment_duration: Optional[float] = None, segment_ends: Optional[List[int]] = None, time_sleep: Optional[float] = None, interpolate: bool = True, enable_view: bool = False,check_timeout:bool=False, temp_csv_dir: Optional[str] = None):
+    def __init__(self, device_ws_url_list: Optional[List[dict]] = None, enable_kcp: bool = False, arm_config: Optional[dict] = None, waypoints: Optional[List[dict]] = None, segment_duration: Optional[float] = None, segment_ends: Optional[List[int]] = None, time_sleep: Optional[float] = None, interpolate: bool = True, enable_view: bool = False,check_timeout:bool=False, temp_csv_dir: Optional[str] = None, csv_out_path: Optional[str]=None):
         super().__init__()
         
         self._task = None
@@ -28,6 +28,7 @@ class ArmCoordinator(BaseCoordinator):
         self._enable_view = enable_view
         self._check_timeout = check_timeout
         self._temp_csv_dir = temp_csv_dir
+        self._csv_out_path = csv_out_path
         
         # 进程通信管理
         self._arm_ipc = ArmCommChannelManager()
@@ -118,7 +119,10 @@ class ArmCoordinator(BaseCoordinator):
         
         # out csv
         t = time.strftime("%Y-%m-%d %H:%M:%S")
-        write_csv(self._mp_quque,f"/home/tl/ssd/docker_link/python/hex_device_test/log/arm_test_{t}.csv")
+        if self._csv_out_path in (None, ""):
+            self._csv_out_path = f"/home/tl/ssd/docker_link/python/hex_device_test/log/arm_test_{t}.csv"
+        
+        write_csv(self._mp_quque, self._csv_out_path)
         
         # ipc_clean
         self._ipc_clean()

@@ -273,6 +273,7 @@ def main():
             enable_view=enable_view,
             check_timeout=check_timeout,
             temp_csv_dir=temp_csv_dir,
+            csv_out_path="",
         )
         
         # 信号处理

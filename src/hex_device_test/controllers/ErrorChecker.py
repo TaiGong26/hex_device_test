@@ -1,6 +1,6 @@
 from typing import List, Tuple, Optional,Any, Union
 
-from hex_device import Arm, MotorError
+from hex_device import Arm, Hands, MotorError
 from hex_device import public_api_types_pb2
 
 from hex_device_test.statuses.ArmStatus import ArmErrorStatus
@@ -11,7 +11,7 @@ class ArmErrorChecker:
     """
     
     @staticmethod
-    def check_device(check_timeout:bool,device: Arm, connLost:bool) -> Tuple[bool, List[Tuple[ArmErrorStatus,List[Any]]]]:
+    def check_device(check_timeout:bool,device: Arm, connLost:bool, hands:Optional[Hands]) -> Tuple[bool, List[Tuple[ArmErrorStatus,List[Any]]]]:
         """
         全面检查设备状态
         返回: (has_error, error_list)
@@ -42,6 +42,16 @@ class ArmErrorChecker:
                     reasons.append(res)
             
             errors.append((err_code_motor,reasons))
+        
+        if hands is not None:
+            err_motor,err_code_motor,reason = ArmErrorChecker._check_motor_error(hands)
+            if err_motor:
+                reasons = []
+                for idx, err in enumerate(reason):
+                    if err is not None:
+                        res = f"hands motor{idx} err:{MotorError(err).name}"
+                        reasons.append(res)
+                errors.append((err_code_motor,reasons))
         
         return len(errors) > 0, errors
     
@@ -79,7 +89,7 @@ class ArmErrorChecker:
         return False, ArmErrorStatus.Normal, None
     
     @staticmethod
-    def _check_motor_error(device:Arm) -> Tuple[bool, ArmErrorStatus, Optional[Any]]:
+    def _check_motor_error(device:Union[Arm,Hands]) -> Tuple[bool, ArmErrorStatus, Optional[Any]]:
         """"get motor error
         
         return bool , reason
@@ -90,6 +100,9 @@ class ArmErrorChecker:
             
         for i, code in enumerate(error_codes):
             if code is not None:
+                if isinstance(device,Hands):
+                    return True, ArmErrorStatus.HandsError, error_codes
+                
                 return True, ArmErrorStatus.MotorError, error_codes
 
         return False, ArmErrorStatus.Normal, None
@@ -117,3 +130,5 @@ class ArmErrorChecker:
                 return public_api_types_pb2.ParkingStopCategory.Name(reason)
             elif isinstance(reason,str):
                 return reason
+            
+    
