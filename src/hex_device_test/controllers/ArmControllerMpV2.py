@@ -40,6 +40,7 @@ from ..tools.trajectory_loader import DEFAULT_SEGMENT_DURATION
 from ..statuses.ArmProcessIPC import ArmCommChannel
 from ..statuses.ArmStatus import ArmControllerStatus, ArmErrorStatus
 from ..controllers.arm_state_machine_process import ArmControllerProcessStateMachine
+from hex_device_test.controllers import ErrorChecker
 
 
 class ArmControllerMpV2(BaseController):
@@ -134,25 +135,12 @@ class ArmControllerMpV2(BaseController):
             while not self._loop_running.is_set():
                 try:
 
-                    # ── 设备未发现：累计超时 + 睡眠 + 跳过 ──
-                    if self._device is None:
-                        self._connect_timeout_elapsed += self._task_interval
-                        # ⚠️ 修复：超时后检查 _exit_requested，避免死循环
-                        self._check_connect_timeout()
-                        if self._exit_requested:
-                            break
-                        time.sleep(self._task_interval)
-                        continue
-
-
+                    # ##TODO: 超时检查
+                    
                     self.error_check()
                     
                     self.state_update()
 
-                    # if self._exit_requested:
-                    #     break
-
-                    # 
                     self.run_tick()
                     time.sleep(self._task_interval)
 
@@ -190,7 +178,6 @@ class ArmControllerMpV2(BaseController):
         self._prev_segment_index = None
         self._last_temp_log_time = 0.0
         self._consecutive_errors = 0
-        self._exit_requested = False
         self._loop_initialized = False
         
         # 组件
@@ -198,7 +185,13 @@ class ArmControllerMpV2(BaseController):
         self._temp_csv_writer = None
 
     def init_mod(self):
-        """模块创建（状态机 / API / 轨迹 / CSV / 可视化）"""
+        """模块创建（状态机 / API / 轨迹设备发现 + 错误扫描
+
+        分四步：
+        1. 设备发现（仅一次）—— 找到第一个 Arm 实例
+        2. API 退出检查
+        3. 连接丢失检查
+        4. ArmErrorChecker 全面错误扫描 → Brake / CSV / 可视化）"""
         # 状态机
         self._state_machine = ArmControllerProcessStateMachine(
             self._device_id, self._arm_ipc
@@ -212,6 +205,9 @@ class ArmControllerMpV2(BaseController):
             self._sender = PlotjuggleDraw()
             self._sender.start()
 
+        # ── ErrorChecker ──
+        self._error_checker = ErrorChecker()
+        
         # HexDeviceApi
         self._hex_api = HexDeviceApi(
             ws_url=self._ws_url,
@@ -265,72 +261,39 @@ class ArmControllerMpV2(BaseController):
 
     def error_check(self):
         """
-        设备发现 + 错误扫描
-
-        分四步：
-        1. 设备发现（仅一次）—— 找到第一个 Arm 实例
-        2. API 退出检查
-        3. 连接丢失检查
-        4. ArmErrorChecker 全面错误扫描 → Brake
+        
         """
         # ── 1. 设备发现（仅一次） ──
-        if self._device is None:
-            for dev in self._hex_api.device_list:
-                if isinstance(dev, Arm):
-                    self._device = dev
-                    if not self._device.reload_arm_config_from_dict(self._arm_config):
-                        self._state_machine.transition(
-                            ArmControllerStatus.Exit,
-                            f"errors: device{self._device_id} not arm config"
-                        )
-                    print(f"dev{self._device_id}: robot_type{self._device.robot_type}")
+        # if self._device is None:
+        #     for dev in self._hex_api.device_list:
+        #         if isinstance(dev, Arm):
+        #             self._device = dev
+        #             # if not self._device.reload_arm_config_from_dict(self._arm_config):
+        #             #     self._state_machine.transition(
+        #             #         ArmControllerStatus.Exit,
+        #             #         f"errors: device{self._device_id} not arm config"
+        #             #     )
+                   
+        #             # print(f"dev{self._device_id}: robot_type{self._device.robot_type}")
 
-                    # CSV header：设备发现后用实际 motor_count 动态生成
-                    if self._temp_csv_writer is not None:
-                        n_motors = self._device.motor_count
-                        header = ["timestamp"] + [f"motor_{i}" for i in range(n_motors)]
-                        self._temp_csv_writer.writerow(header)
-                        self._temp_csv_file.flush()
-                    break
+        #             # CSV header：设备发现后用实际 motor_count 动态生成
+        #             if self._temp_csv_writer is not None:
+        #                 n_motors = self._device.motor_count
+        #                 header = ["timestamp"] + [f"motor_{i}" for i in range(n_motors)]
+        #                 self._temp_csv_writer.writerow(header)
+        #                 self._temp_csv_file.flush()
+        #             break
 
-            if self._device is None:
-                return  # 调用方感知 None 后处理超时 + continue
+        #     if self._device is None:
+        #         return  # 调用方感知 None 后处理超时 + continue
 
         # ── 2. API 退出检查 ──
-        if self._hex_api.is_api_exit():
-            self._exit_requested = True
-            return
-
-        # ── 3. 连接丢失检查 ──
+        ## pass
+        
+        # ── 3. error check ──
         conn_lost = self._hex_api.is_websocket_recv_timeout()
-
-        # ── 4. 错误扫描 → Brake ──
-        has_error, errors = ArmErrorChecker.check_device(
-            self._check_timeout, self._device, conn_lost
-        )
-        if has_error:
-            error_codes = [err_tuple[0] for err_tuple in errors]
-            min_error_code = min(error_codes, key=lambda x: x.value)
-            self._arm_ipc.set_error_status(min_error_code.value)
-
-            error_details = []
-            for code, reasons in errors:
-                info = ArmErrorChecker.format_error(code, reasons)
-                error_details.append(f"{code.name}: {info}")
-                self._device_state.set_error(code, info)
-
-            final_error_msg = " | ".join(error_details)
-            self._state_machine.transition(
-                ArmControllerStatus.Brake,
-                f"errors: {final_error_msg}"
-            )
-
-    def _check_connect_timeout(self):
-        """连接超时检查——累计超过阈值则标记退出"""
-        if self._connect_timeout_elapsed >= self._connect_timeout:
-            print(f"[Dev {self._device_id}] connect timeout "
-                  f"({self._connect_timeout}s), exit")
-            self._exit_requested = True
+        self._error_checker.update(self._device, self._check_timeout, conn_lost)
+        
 
     def state_update(self):
         """
@@ -373,7 +336,6 @@ class ArmControllerMpV2(BaseController):
 
         elif current_state == ArmControllerStatus.Exit:
             self._state_machine.handle_exit()
-            self._exit_requested = True
 
     def _update_loop_count(self):
         """分段轨迹循环计数（旧代码 L377-383）"""
@@ -406,7 +368,7 @@ class ArmControllerMpV2(BaseController):
         # ── 3. 电机温度 + 驱动温度 ──
         motor_temps = self._device.get_motor_temperatures()
         driver_temps = self._device.get_motor_driver_temperatures()
-        self._device_state.update(motor_temps, driver_temps)
+        # self._device_state.update(motor_temps, driver_temps)
 
         # ── 4. CSV 日志（~1Hz） ──
         if self._temp_csv_writer is not None:
@@ -472,7 +434,7 @@ class ArmControllerMpV2(BaseController):
             except Exception:
                 pass
 
-        # 2. Pipe 排空 + 关闭
+        # 2. Pipe 回收
         if self._arm_ipc is not None:
             try:
                 if self._arm_ipc.cmd_recv_pipe.poll(timeout=0):
@@ -487,11 +449,14 @@ class ArmControllerMpV2(BaseController):
         # 3. 上报汇总数据
         if self._mp_queue is not None:
             try:
-                report = {self._device_id: self._device_state.get_summary()}
-                report[self._device_id].update({
-                    "loop_counter": self._loop_counter,
-                })
-                self._mp_queue.put(report)
+                pass
+                # report = {self._device_id: self._device_state.get_summary()}
+                # report[self._device_id].update({
+                #     "loop_counter": self._loop_counter,
+                # })
+                
+                
+                # self._mp_queue.put(report)
             except Exception:
                 pass
 
