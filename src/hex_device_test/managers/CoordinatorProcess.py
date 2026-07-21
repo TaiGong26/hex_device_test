@@ -120,7 +120,7 @@ class ArmCoordinator(BaseCoordinator):
         # out csv
         t = time.strftime("%Y-%m-%d %H:%M:%S")
         if self._csv_out_path in (None, ""):
-            self._csv_out_path = f"/home/tl/ssd/docker_link/python/hex_device_test/log/arm_test_{t}.csv"
+            self._csv_out_path = f"~/log/hex_device_test/arm_test_{t}.csv"
         
         write_csv(self._mp_quque, self._csv_out_path)
         
