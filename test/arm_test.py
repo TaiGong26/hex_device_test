@@ -131,6 +131,14 @@ def main():
         help='Directory to write per-device motor temperature CSV files (e.g. /tmp/temp_logs)'
     )
     
+    parser.add_argument(
+        '--csv-out',
+        type=str,
+        default= None,
+        metavar='DIR',
+        help='Directory to write per-device motor temperature CSV files (e.g. /tmp/temp_logs)'
+    )
+    
     # =============== parse args ===============
     args = parser.parse_args()
     
@@ -144,6 +152,7 @@ def main():
     enable_view = args.view
     check_timeout = args.timeout
     temp_csv_dir = args.temp_csv_dir
+    csv_out_path = args.csv_out
     time_sleep = args.time_sleep
     interpolate = not args.raw
     segment_ends = None
@@ -273,7 +282,7 @@ def main():
             enable_view=enable_view,
             check_timeout=check_timeout,
             temp_csv_dir=temp_csv_dir,
-            csv_out_path="",
+            csv_out_path=csv_out_path,
         )
         
         # 信号处理
