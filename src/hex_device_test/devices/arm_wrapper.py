@@ -1,7 +1,7 @@
 """ArmWrapper — hex_driver_robot.robot 层后端实现
 
 设计要点：
-  - 使用 HexRobotArcherY6Callback 代替手动 HexDriver + Arm + work_loop 管理
+  - 按 params.robot_name 字符串分派，使用对应 HexRobot*Callback（Archer/Firefly）代替手动 HexDriver + Arm + work_loop 管理
   - Robot 层内部管理 HexDriver、Arm、Hands 设备创建及 work_loop
   - 自定义 callbacks 在 work_loop 线程内原子更新 _cache
   - motor_command / brake 委托给 robot 层 set_arm_pos_cmd / set_grip_pos_cmd
@@ -33,15 +33,26 @@ from .wrapper_base import WrapperBase, WrapperParams, GRIP_INFO_MAP
 _RECV_TIMEOUT = 3.0          # 秒 — 接收超时判定
 _API_EXIT_TIMEOUT = 15.0     # 秒 — 超过此时长无数据视为 API 已退出
 
+# === 机器人分派表（key = robot_name 字符串）===
+# 仅支持 6 轴带夹爪机械臂。Archer / Firefly 的 callback 与 Params 字段集完全一致，
+# 因此只需按字符串切换 (Params 类, Callback 类)，其余 wrapper 代码共用接口。
+ARM_ROBOT_DISPATCH = {
+    "Archer_y6":  (HexRobotArcherY6Callback,  HexRobotArcherY6Params),
+    "Firefly_y6": (HexRobotFireflyY6Callback, HexRobotFireflyY6Params),
+}
+
 
 class ArmWrapper(WrapperBase):
     """Arm 设备操作——hex_driver_robot.robot 后端实现
 
     生命周期：
-        ArmWrapper(params)          → 创建 HexRobotArcherY6Callback（阻塞等待首次数据）
+        ArmWrapper(params)          → 按 params.robot_name 创建对应 HexRobot*Callback（阻塞等待首次数据）
         start()                     → 启动 robot 内部 work_loop 线程
         motor_command(...)/get_*()  → 正常控制/读取
         shutdown()                  → 停止 work_loop → 关闭连接
+
+    机器人分派：仅支持 6 轴带夹爪机械臂（Archer_y6 / Firefly_y6）。
+      直接按 params.robot_name 字符串查找 ARM_ROBOT_DISPATCH 创建对应 callback + param 类。
     """
 
     def __init__(self, logger=None, params: Optional[WrapperParams] = None):
@@ -59,7 +70,7 @@ class ArmWrapper(WrapperBase):
 
     def init_vars(self):
         """设置成员变量（不涉及连接/IO）"""
-        self._robot: Optional[HexRobotArcherY6Callback] = None
+        self._robot: Optional[Any] = None
         self._motor_count: int = 0
 
         # ── 状态缓存（callback 原子更新） ──
@@ -104,10 +115,18 @@ class ArmWrapper(WrapperBase):
     # ==================================================================
 
     def init_robot(self):
-        """创建 HexRobotArcherY6Callback（阻塞等待首次数据），预分配缓存数组"""
+        """按 params.robot_name 字符串创建对应 HexRobot*Callback（阻塞等待首次数据），预分配缓存数组"""
         try:
-            # ① 构建 robot 参数
-            robot_params = HexRobotArcherY6Params(
+            # ① 分派：robot_name → (CallbackCls, ParamsCls)
+            robot_name = self._params.robot_name
+            if robot_name not in ARM_ROBOT_DISPATCH:
+                raise ValueError(
+                    f"unknown robot_name '{robot_name}'; 支持: {list(ARM_ROBOT_DISPATCH)}"
+                )
+            callback_cls, params_cls = ARM_ROBOT_DISPATCH[robot_name]
+
+            # ② 构建 robot 参数（Archer/Firefly 字段集一致，统一透传）
+            robot_params = params_cls(
                 host=self._params.host,
                 port=self._params.port,
                 ctrl_rate=self._params.ctrl_rate,
@@ -119,8 +138,8 @@ class ArmWrapper(WrapperBase):
                 log_level=self._params.log_level,
             )
 
-            # ② 创建 robot → __init__ 中 init_robot() 阻塞等待首次数据
-            self._robot = HexRobotArcherY6Callback(
+            # ③ 创建 robot → __init__ 中 init_robot() 阻塞等待首次数据
+            self._robot = callback_cls(
                 params=robot_params,
                 callbacks={
                     "arm_state": self._arm_state_cb,
@@ -128,14 +147,14 @@ class ArmWrapper(WrapperBase):
                 },
             )
 
-            # ③ 读取 DOF 信息
+            # ④ 读取 DOF 信息
             dofs = self._robot.get_dofs()
             self._motor_count = dofs["arm"]
 
-            # ④ 预分配 _cache 数组
+            # ⑤ 预分配 _cache 数组
             self._init_cache_arrays(self._motor_count, dofs.get("grip", 0))
 
-            # ⑤ 启动 work_loop 线程（HexRobotArcherY6Callback.__init__ 仅构建线程，不启动）
+            # ⑥ 启动 work_loop 线程（callback 的 __init__ 仅构建线程，不启动）
             self._robot.start()
             self._log_info("ArmWrapper initialized")
 
@@ -395,31 +414,6 @@ class ArmWrapper(WrapperBase):
         with self._cache_lock:
             return self._cache["session_holder"]
 
-    # ==================================================================
-    # 错误检查
-    # ==================================================================
-
-    def is_api_exit(self) -> bool:
-        """API 是否已退出
-
-        映射到：
-          - robot.is_working() — work_loop 线程是否存活
-          - 长时间无数据（超过 _API_EXIT_TIMEOUT）视为连接断开
-        """
-        if self._robot is None:
-            return True
-        if not self._robot.is_working():
-            return True
-        if time.monotonic() - self._last_recv_time > _API_EXIT_TIMEOUT:
-            return True
-        return False
-
-    def is_websocket_recv_timeout(self) -> bool:
-        """接收超时
-
-            - 超过 _RECV_TIMEOUT 秒未收到任何上游数据，判为超时
-        """
-        return (time.monotonic() - self._last_recv_time) > _RECV_TIMEOUT
 
     def get_robot_info(self) -> Dict:
         """arm 的 mode、overtaken 信息
@@ -431,11 +425,3 @@ class ArmWrapper(WrapperBase):
         }
         """
         return self._cache_info.copy()
-
-    # ==================================================================
-    # 兼容方法（旧 API 残留）
-    # ==================================================================
-
-    def get_parking_stop_detail(self):
-        """停车详情（hex_driver_robot 无 parking_stop 概念，返回 None）"""
-        return None

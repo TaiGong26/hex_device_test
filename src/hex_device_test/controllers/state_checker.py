@@ -109,7 +109,7 @@ class StateChecker:
 
     def get_summary(self) -> Dict[str, Any]:
         """返回累计汇总统计（浅拷贝）"""
-        return dict(self._summary)
+        return dict(self._summary).copy()
 
     def mark_task_end(self) -> None:
         """标记任务结束时间"""

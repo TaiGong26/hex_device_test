@@ -18,22 +18,25 @@ import numpy as np
 
 from hex_driver_robot.base import HexRobotBaseParams
 from hex_driver_robot.tcp_base.generated.public_api_types_pb2 import (
-    RobotType as _RobotType,
     SecondaryDeviceType as _SecondaryDeviceType,
 )
 
+# ── 机器人身份映射 ──
+# robot_type（int）是权威分派键，直接对应 hex_driver_robot 的 RobotType 枚举：
+#   25 = RtArmArcherY6_H1（ArcherY6）、27 = RtArmFireflyY6_H1（FireflyY6）。
+# robot_name（str）用于交叉校验（见 arm_wrapper._resolve_robot），两者冲突时报错。
 ARM_ROBOT_TYPE_MAP = {
-    "Archer_y6": _RobotType.RtArmArcherY6_H1,
-    "Firefly_y6": _RobotType.RtArmFireflyY6_H1,
+    "Archer_y6": 25,
+    "Firefly_y6": 27,
 }
 
 ARM_INFO_MAP = {
     "Archer_y6": {
-        "robot_type": _RobotType.RtArmArcherY6_H1,
+        "robot_type": 25,
         "motor_count": 6,
     },
     "Firefly_y6": {
-        "robot_type": _RobotType.RtArmFireflyY6_H1,
+        "robot_type": 27,
         "motor_count": 6,
     },
 }
@@ -55,7 +58,6 @@ class WrapperParams(HexRobotBaseParams):
     log_level:      str         = "DEBUG"
     grip_type:      str         = "empty"
     robot_name:     str         = "Archer_y6"
-    robot_type:     int         = 25
     
 
 class WrapperBase(ABC):
@@ -126,20 +128,6 @@ class WrapperBase(ABC):
     @abstractmethod
     def get_session_info(self) -> Dict[str, Any]:
         """返回 dict: my_session_id, session_holder, robot_mode, calibrated"""
-
-    # ── 错误检查 ──
-
-    @abstractmethod
-    def is_api_exit(self) -> bool:
-        """API 是否已退出"""
-
-    @abstractmethod
-    def is_websocket_recv_timeout(self) -> bool:
-        """WebSocket 接收超时"""
-
-    @abstractmethod
-    def get_parking_stop_detail(self):
-        """停车详情（hex_driver_robot 返回默认值）"""
 
     # ── 控制命令 ──
 

@@ -137,8 +137,6 @@ class ArmControllerMpV2(BaseController):
             while not self._loop_running.is_set():
                 try:
 
-                    # ##TODO: 超时检查
-                    
                     self.state_check()
                     
                     self.state_transition()
@@ -152,14 +150,6 @@ class ArmControllerMpV2(BaseController):
                     pass
 
                 except Exception as e:
-                    # self._consecutive_errors += 1
-                    # print(f"[Dev {self._device_id}] loop exception: {e}")
-                    # traceback.print_exc()
-                    # if self._arm_ipc is not None:
-                    #     self._arm_ipc.set_error_status(ArmErrorStatus.ProcessError.value)
-                    # if self._consecutive_errors >= self._max_consecutive_errors:
-                    #     print(f"[Dev {self._device_id}] too many consecutive errors, exit")
-                    #     break
                     print(f"[Dev {self._device_id}] 循环异常: {e}")
                     self._arm_ipc.set_error_status(ArmErrorStatus.ProcessError.value)
                 
@@ -208,15 +198,14 @@ class ArmControllerMpV2(BaseController):
             self._sender = PlotjuggleDraw()
             self._sender.start()
         
-        # HexDeviceApi
-        # self._hex_api = HexDeviceApi(
-        #     ws_url=self._ws_url,
-        #     local_port=0,
-        #     enable_kcp=self._enable_kcp,
-        # )
-        
-        self._param = WrapperParams()
-        self._device = ArmWrapper(self._param)
+        # 设备接入：ArmWrapper（hex_driver_robot 后端），接收一个 WrapperParams
+        param = WrapperParams(
+            enable_kcp=self._enable_kcp,
+            log_level="DEBUG",
+            grip_type="empty",
+            robot_name="Archer_y6",
+        )
+        self._device = ArmWrapper(params=param)
         
         # 轨迹规划器
         if self._waypoints:
@@ -262,40 +251,24 @@ class ArmControllerMpV2(BaseController):
             self._temp_csv_writer = csv.writer(self._temp_csv_file)
             print(f"dev{self._device_id}: temperature CSV -> {csv_path}")
 
+
     def state_check(self):
-        """
         
-        """
-        # ── 1. 设备发现（仅一次） ──
-        # if self._device is None:
-        #     for dev in self._hex_api.device_list:
-        #         if isinstance(dev, Arm):
-        #             self._device = dev
-        #             # if not self._device.reload_arm_config_from_dict(self._arm_config):
-        #             #     self._state_machine.transition(
-        #             #         ArmControllerStatus.Exit,
-        #             #         f"errors: device{self._device_id} not arm config"
-        #             #     )
-                   
-        #             # print(f"dev{self._device_id}: robot_type{self._device.robot_type}")
-
-        #             # CSV header：设备发现后用实际 motor_count 动态生成
-        #             if self._temp_csv_writer is not None:
-        #                 n_motors = self._device.motor_count
-        #                 header = ["timestamp"] + [f"motor_{i}" for i in range(n_motors)]
-        #                 self._temp_csv_writer.writerow(header)
-        #                 self._temp_csv_file.flush()
-        #             break
-
-        #     if self._device is None:
-        #         return  # 调用方感知 None 后处理超时 + continue
-
-        # ── 2. API 退出检查 ──
-        ## pass
+        # 计算轨迹位置
+        self._target_pos = (self._trajectory.get_current_target()
+                            if self._trajectory else None)
+        self._motor_pos = self._device.get_motor_positions()
+        self._last_pos = (self._trajectory.get_last_position()
+                          if self._trajectory else None)
         
-        # ── 3. error check ──
-        conn_lost = self._hex_api.is_websocket_recv_timeout()
-        self._error_checker.update(self._device, self._check_timeout, conn_lost)
+        # temperature update
+        motor_temps = self._device.get_motor_temperatures()
+        driver_temps = self._device.get_motor_driver_temperatures()
+        self._device_state.update(motor_temps, driver_temps)
+
+        # error check
+        self._device_state.update_error(self._error_checker.get_error_status_dict())
+        
         
 
     def state_transition(self):
@@ -352,27 +325,17 @@ class ArmControllerMpV2(BaseController):
 
     def update_state_to_flie(self):
         """
-        轨迹目标计算 + 温度采集 + CSV 日志 + 可视化
+        CSV 日志 + 可视化
 
-        _target_pos 在本 tick 计算，供下一个 tick 的 state_transition() 使用。
         """
-        # ── 1. 轨迹目标 + 电机位置 ──
-        self._target_pos = (self._trajectory.get_current_target()
-                            if self._trajectory else None)
-        self._motor_pos = self._device.get_motor_positions()
-        self._last_pos = (self._trajectory.get_last_position()
-                          if self._trajectory else None)
 
-        # ── 2. 可视化数据 ──
+
+        # ── 1. 可视化数据 ──
         if self._enable_view and self._sender is not None:
             self._send_view_data()
 
-        # ── 3. 电机温度 + 驱动温度 ──
+        # ── 2. CSV 日志（~1Hz） ──
         motor_temps = self._device.get_motor_temperatures()
-        driver_temps = self._device.get_motor_driver_temperatures()
-        # self._device_state.update(motor_temps, driver_temps)
-
-        # ── 4. CSV 日志（~1Hz） ──
         if self._temp_csv_writer is not None:
             now = time.monotonic()
             if now - self._last_temp_log_time >= 1.0:
@@ -452,13 +415,13 @@ class ArmControllerMpV2(BaseController):
         if self._mp_queue is not None:
             try:
                 pass
-                # report = {self._device_id: self._device_state.get_summary()}
-                # report[self._device_id].update({
-                #     "loop_counter": self._loop_counter,
-                # })
+                report = {self._device_id: self._device_state.get_summary()}
+                report[self._device_id].update({
+                    "loop_counter": self._loop_counter,
+                })
                 
                 
-                # self._mp_queue.put(report)
+                self._mp_queue.put(report)
             except Exception:
                 pass
 
