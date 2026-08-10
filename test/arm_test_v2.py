@@ -131,6 +131,15 @@ def main():
         help='Directory to write per-device motor temperature CSV files (e.g. /tmp/temp_logs)'
     )
 
+    parser.add_argument(
+        '--robot-type',
+        type=str,
+        choices=["Archer_y6", "Firefly_y6"],
+        default="Archer_y6",
+        metavar='NAME',
+        help='Robot model for all arms, one of: Archer_y6, Firefly_y6 (same for every device; default: Archer_y6)'
+    )
+
     # =============== parse args ===============
     args = parser.parse_args()
 
@@ -206,6 +215,7 @@ def main():
             dev_ip_list,
             enable_kcp,
             arm_config=config_dict,
+            robot_type=args.robot_type,
             waypoints=arm_position,
             segment_duration=segment_duration,
             segment_ends=segment_ends,

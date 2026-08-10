@@ -29,15 +29,25 @@ def write_csv(mp_queue:Queue, file_path):
                     "loop_counter": data["loop_counter"],
                 }
 
-                # 展开电机温度
-                motors = data["motor_max_temperature"] or []
+                # 展开电机最高温（controller 键 motor_temp_max）
+                motors = data["motor_temp_max"] or []
                 for i, v in enumerate(motors):
                     row[f"motor_{i}_temperature"] = v
 
-                # 展开驱动温度
-                drivers = data["motor_driver_max_temperature"] or []
+                # 展开电机最低温（controller 键 motor_temp_min）
+                m_mins = data["motor_temp_min"] or []
+                for i, v in enumerate(m_mins):
+                    row[f"motor_{i}_temperature_min"] = v
+
+                # 展开驱动最高温（controller 键 driver_temp_max）
+                drivers = data["driver_temp_max"] or []
                 for i, v in enumerate(drivers):
                     row[f"driver_{i}_temperature"] = v
+
+                # 展开驱动最低温（controller 键 driver_temp_min）
+                d_mins = data["driver_temp_min"] or []
+                for i, v in enumerate(d_mins):
+                    row[f"driver_{i}_temperature_min"] = v
 
                 # errors（转字符串）
                 row["errors"] = " | ".join(list(data["errors"]))

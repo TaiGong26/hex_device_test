@@ -70,7 +70,7 @@ class ArmWrapper(WrapperBase):
 
     def init_vars(self):
         """设置成员变量（不涉及连接/IO）"""
-        self._robot: Optional[Any] = None
+        self._robot: Optional[Union[HexRobotArcherY6Callback,HexRobotFireflyY6Callback]] = None
         self._motor_count: int = 0
 
         # ── 状态缓存（callback 原子更新） ──
@@ -219,7 +219,7 @@ class ArmWrapper(WrapperBase):
                 if motor_status["driver_temp"] is not None:
                     self._cache["driver_temps"][:] = motor_status["driver_temp"]
                 if motor_status["error"] is not None:
-                    self._cache["error_codes"] = [e.copy() for e in motor_status["error"]]
+                    self._cache["error_codes"][:] = motor_status["error"]
             # robot mode
             if self._robot is not None:
                 self._cache_info["robot_mode"] = self._robot.get_arm_robot_mode() or ""
@@ -257,6 +257,10 @@ class ArmWrapper(WrapperBase):
     def motor_count(self) -> int:
         """电机数量"""
         return self._motor_count
+
+    def has_grip(self) -> bool:
+        """是否有夹爪（按 grip_type 配置判断，不依赖回调时序）"""
+        return self._grip_dof > 0
 
     # ==================================================================
     # API — 控制命令
@@ -425,3 +429,6 @@ class ArmWrapper(WrapperBase):
         }
         """
         return self._cache_info.copy()
+
+    def get_arm_robot_mode(self):
+        return self._robot.get_arm_robot_mode()

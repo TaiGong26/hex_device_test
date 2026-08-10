@@ -35,18 +35,21 @@ class StateChecker:
 
     生命周期：
       checker = StateChecker()           # __init__ 记录 task_start_time
-      checker.update(data_dict)          # 每 tick 调用
-      checker.is_error()                 # 检查当前是否有错误
-      checker.get_current_info()         # 实时状态快照
+      checker.update(data_dict)          # 每 tick 调用（温度 min/max）
+      checker.update_error(...)          # 维护错误历史列表（永久去重）
+      checker.is_error()                 # 判断错误历史队列是否有错误
       checker.get_summary()              # 累计汇总
       checker.mark_task_end()            # 任务结束时标记
     """
 
     def __init__(self, max_error_history: int = 100):
         self._task_start_time: str = _now_str()
+        self._task_start_ts: float = time.time()   # 任务启动时刻（float 秒，供 run_time 计算）
         self._max_error_history = max_error_history
 
-        # self._current_state: Dict[str, Any] = self._empty_current_state()
+        # 错误历史：元素 {"source", "motor", "error", "time"}；_error_seen 做永久去重
+        self._error_history: List[Dict] = []
+        self._error_seen: set = set()
         self._summary: Dict[str, Any] = self._empty_summary()
 
     # ── 公共接口 ──
@@ -69,22 +72,6 @@ class StateChecker:
         ### TODO: 仅维护一个summary的update。以及 error []
         
         now_str = _now_str()
-
-        # # 刷新 current_state（统一转为 list，兼容 np.ndarray 输入）
-        # self._current_state["system_time"] = now_str
-        # self._current_state["motor_positions"] = _to_list(data.get("motor_positions"))
-        # self._current_state["motor_temps"] = _to_list(data.get("motor_temps"))
-        # self._current_state["driver_temps"] = _to_list(data.get("driver_temps"))
-        # self._current_state["motor_error_codes"] = _to_list(data.get("motor_error_codes"))
-        # self._current_state["robot_mode"] = data.get("robot_mode", "")
-        # self._current_state["overtoken_mode"] = data.get("overtoken_mode", "")
-        # self._current_state["overtoken_reason"] = data.get("overtoken_reason", "")
-        # self._current_state["conn_lost"] = data.get("conn_lost", False)
-        # self._current_state["api_exit"] = data.get("api_exit", False)
-        # # TODO: 待用户评估 ArmErrorStatus 枚举后，补充具体错误检测逻辑
-        # self._current_state["has_error"] = False
-        # self._current_state["errors"] = []
-
         # 更新温度 min/max
         self._update_temp_summary(data.get("motor_temps"), now_str,
                                    "motor_temp_min", "motor_temp_max",
@@ -94,22 +81,74 @@ class StateChecker:
                                    "driver_temp_min_time", "driver_temp_max_time")
 
     def is_error(self) -> bool:
-        """当前是否有活动错误（占位，当前始终返回 False）"""
-        ### TODO: 以error history作为依据
-        # return self._current_state.get("has_error", False)
-        return self._current_state.get("has_error", False)
+        """直接判断错误历史队列中是否有错误"""
+        return len(self._error_history) > 0
 
-    def update_error(self):
-        ### TODO： summry的error list并没有更新
-        pass
-    
+
+    def update_error(
+        self,
+        arm_err: Optional[List[List[str]]] = None,
+        grip_err: Optional[List[List[str]]] = None,
+        robot_mode: Optional[str] = None,
+    ) -> None:
+        """维护错误历史列表（永久去重，每电机每错误仅记一次）
+
+        Args:
+            arm_err     : Optional[List[List[str]]] — arm 各电机错误枚举名称列表（None 不处理）
+            grip_err    : Optional[List[List[str]]] — grip 各电机错误枚举名称列表（None 不处理）
+            robot_mode  : Optional[str]             — "RmXxx" 字符串；只记录
+                          "RmFatalError"/"RmOvertaken"，其余忽略
+        """
+        if arm_err is not None:
+            for i, errs in enumerate(arm_err):
+                for name in errs:
+                    self._append_error("arm", i, name)
+
+        if grip_err is not None:
+            for i, errs in enumerate(grip_err):
+                for name in errs:
+                    self._append_error("grip", i, name)
+
+        if robot_mode in ("RmFatalError", "RmOvertaken"):
+            self._append_error("robot", -1, robot_mode)
+
+    def _append_error(self, source: str, motor: int, error: str) -> None:
+        """追加一条错误到历史（永久去重：同一 (source, motor, error) 仅记一次）"""
+        key = (source, motor, error)
+        if key in self._error_seen:
+            return
+        self._error_seen.add(key)
+        self._error_history.append({
+            "source": source,
+            "motor": motor,
+            "error": error,
+            "time": _now_str(),
+        })
+
     # def get_current_info(self) -> Dict[str, Any]:
     #     """返回当前状态快照（浅拷贝）"""
     #     return dict(self._current_state)
 
     def get_summary(self) -> Dict[str, Any]:
-        """返回累计汇总统计（浅拷贝）"""
-        return dict(self._summary).copy()
+        """返回累计汇总统计（浅拷贝）
+
+        键名即 controller 上报给 CSV 的基准：温度沿用内部
+        motor_temp_min/max、driver_temp_min/max，另增 run_time（HH:MM:SS）。
+        """
+        summary = dict(self._summary).copy()
+        # 任务运行时长（HH:MM:SS），供 CsvLogger 的 data["run_time"]
+        summary["run_time"] = self._fmt_run_time(time.time() - self._task_start_ts)
+        # errors（供 CsvLogger 的 " | ".join(list(data["errors"]))）
+        summary["errors"] = [f"{e['error']}@{e['time']}" for e in self._error_history]
+        return summary
+
+    @staticmethod
+    def _fmt_run_time(seconds: float) -> str:
+        """将运行秒数格式化为 HH:MM:SS 字符串"""
+        total = max(0, int(seconds))
+        h, rem = divmod(total, 3600)
+        m, s = divmod(rem, 60)
+        return f"{h:02d}:{m:02d}:{s:02d}"
 
     def mark_task_end(self) -> None:
         """标记任务结束时间"""
@@ -163,23 +202,6 @@ class StateChecker:
 
     # ── 初始值工厂 ──
 
-    @staticmethod
-    def _empty_current_state() -> Dict[str, Any]:
-        return {
-            "system_time": "",
-            "motor_positions": None,
-            "motor_temps": None,
-            "driver_temps": None,
-            "motor_error_codes": None,
-            "robot_mode": "",
-            "overtoken_mode": "",
-            "overtoken_reason": "",
-            "conn_lost": False,
-            "api_exit": False,
-            "has_error": False,
-            "errors": [],
-        }
-
     def _empty_summary(self) -> Dict[str, Any]:
         return {
             "task_start_time": self._task_start_time,
@@ -193,4 +215,5 @@ class StateChecker:
             "driver_temp_min_time": None,
             "driver_temp_max_time": None,
             "error_history": [],
+            "errors": [],
         }

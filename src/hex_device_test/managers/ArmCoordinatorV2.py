@@ -30,6 +30,7 @@ class ArmCoordinatorV2(BaseCoordinator):
     def __init__(self, device_ws_url_list: Optional[List[str]] = None,
                  enable_kcp: bool = False,
                  arm_config: Optional[dict] = None,
+                 robot_type: str = "Archer_y6",
                  waypoints: Optional[List[list]] = None,
                  segment_duration: Optional[float] = None,
                  segment_ends: Optional[List[int]] = None,
@@ -42,6 +43,7 @@ class ArmCoordinatorV2(BaseCoordinator):
 
         # 保存配置
         self._enable_kcp = enable_kcp
+        self._robot_type = robot_type
         self._waypoints = waypoints
         self._segment_duration = segment_duration
         self._segment_ends = segment_ends
@@ -68,9 +70,9 @@ class ArmCoordinatorV2(BaseCoordinator):
         self._task: Optional[threading.Thread] = None
 
         # 启动
-        self._start(device_ws_url_list, enable_kcp, arm_config)
+        self._start(device_ws_url_list, enable_kcp, arm_config, robot_type)
 
-    def _start(self, device_ws_url_list, enable_kcp, arm_config):
+    def _start(self, device_ws_url_list, enable_kcp, arm_config, robot_type):
         """
         （内部）启动所有控制器
 
@@ -93,6 +95,7 @@ class ArmCoordinatorV2(BaseCoordinator):
                 task_loop_hz=500,
                 arm_ipc=device_ipc,
                 arm_config=arm_config,
+                robot_type=robot_type,
                 waypoints=self._waypoints,
                 segment_duration=self._segment_duration,
                 segment_ends=self._segment_ends,
@@ -152,11 +155,13 @@ class ArmCoordinatorV2(BaseCoordinator):
             self._task.join(timeout=0.1)
             self._task = None
 
-        # Phase 5: controller 写入 CSV 文件
-        CSV_PATH = f"/home/tl/ssd/docker_link/python/hex_device_test/log/arm_test_{t}.csv"
-        t = time.strftime("%Y-%m-%d %H:%M:%S")
-        write_csv(self._mp_quque,CSV_PATH)
-        print(f"[Coordinator] report written to {CSV_PATH}")
+        # Phase 5: controller 写入 CSV 文件（用 temp_csv_dir，不依赖硬编码路径）
+        if self._temp_csv_dir:
+            os.makedirs(self._temp_csv_dir, exist_ok=True)
+            t = time.strftime("%Y-%m-%d_%H-%M-%S")
+            CSV_PATH = os.path.join(self._temp_csv_dir, f"arm_test_{t}.csv")
+            write_csv(self._mp_queue, CSV_PATH)
+            print(f"[Coordinator] report written to {CSV_PATH}")
 
         self._ipc_clean()
         self._mp_queue.close()

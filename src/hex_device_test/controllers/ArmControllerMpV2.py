@@ -42,7 +42,6 @@ from ..tools.trajectory_loader import DEFAULT_SEGMENT_DURATION
 from ..statuses.ArmProcessIPC import ArmCommChannel
 from ..statuses.ArmStatus import ArmControllerStatus, ArmErrorStatus
 from ..controllers.arm_state_machine_process import ArmControllerProcessStateMachine
-from hex_device_test.controllers import StateChecker
 
 
 class ArmControllerMpV2(BaseController):
@@ -51,6 +50,7 @@ class ArmControllerMpV2(BaseController):
     def __init__(self, ws_url: str, device_id: int = 0, enable_kcp: bool = False,
                  task_loop_hz: int = 500, arm_ipc: Optional[ArmCommChannel] = None,
                  arm_config: Optional[dict] = None,
+                 robot_type: str = "Archer_y6",
                  waypoints: Optional[list] = None,
                  segment_duration: Optional[float] = None,
                  segment_ends: Optional[list] = None,
@@ -65,6 +65,7 @@ class ArmControllerMpV2(BaseController):
         # 模块/设备配置
         self._arm_ipc = arm_ipc
         self._arm_config = arm_config
+        self._robot_type = robot_type
 
         # 轨迹配置
         self._waypoints = waypoints
@@ -203,7 +204,7 @@ class ArmControllerMpV2(BaseController):
             enable_kcp=self._enable_kcp,
             log_level="DEBUG",
             grip_type="empty",
-            robot_name="Archer_y6",
+            robot_name=self._robot_type,
         )
         self._device = ArmWrapper(params=param)
         
@@ -267,8 +268,16 @@ class ArmControllerMpV2(BaseController):
         self._device_state.update(motor_temps, driver_temps)
 
         # error check
-        self._device_state.update_error(self._error_checker.get_error_status_dict())
-        
+        grip_err = (
+            self._device.get_grip_motor_error_codes()
+            if self._device.has_grip() else None
+        )
+        self._device_state.update_error(
+            arm_err=self._device.get_motor_error_codes(),
+            grip_err=grip_err,
+            robot_mode=self._device.get_arm_robot_mode(),
+        )
+
         
 
     def state_transition(self):
@@ -328,8 +337,6 @@ class ArmControllerMpV2(BaseController):
         CSV 日志 + 可视化
 
         """
-
-
         # ── 1. 可视化数据 ──
         if self._enable_view and self._sender is not None:
             self._send_view_data()
@@ -417,6 +424,7 @@ class ArmControllerMpV2(BaseController):
                 pass
                 report = {self._device_id: self._device_state.get_summary()}
                 report[self._device_id].update({
+                    "state": self._state_machine.get_state().value,
                     "loop_counter": self._loop_counter,
                 })
                 
