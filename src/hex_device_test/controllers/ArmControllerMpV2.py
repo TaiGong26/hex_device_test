@@ -9,9 +9,9 @@ run()
   ├── init_var()      —— 变量初始化
   ├── init_mod()      —— 模块创建（状态机 / API / 轨迹 / CSV / 可视化）
   ├── while loop:
-  │   ├── error_check()   —— 设备发现 + 错误扫描
-  │   ├── state_update()  —— Pipe 读取 + 状态机 dispatch
-  │   └── run_tick()      —— 轨迹目标 + 温度 + CSV + View
+  │   ├── state_check()   —— 设备发现 + 错误扫描
+  │   ├── state_transition()  —— Pipe 读取 + 状态机 dispatch
+  │   └── update_state_to_flie()      —— 轨迹目标 + 温度 + CSV + View
   └── _close()        —— finally 资源回收
 
 与旧版的关键差异：
@@ -22,6 +22,9 @@ run()
   - PlotjuggleDraw 仅在 enable_view=True 时创建
 """
 
+#### TODO， 增加Json读取功能，使得适配不同的arm
+
+
 import time
 import traceback
 import csv
@@ -29,18 +32,17 @@ import os
 from typing import Optional, List
 import multiprocessing as mp
 
-from hex_device import HexDeviceApi, Arm
-
-from ..controllers.ErrorChecker import ArmErrorChecker
+from hex_device_test.controllers.state_checker import StateChecker
+from hex_device_test.devices.arm_wrapper import ArmWrapper
+from hex_device_test.devices.wrapper_base import WrapperParams
 from ..tools.plotjuggle import PlotjuggleDraw
 from .BaseController import BaseController
-from .ArmControllerProcess import ArmStatusTable
 from .TrajectoryController import TrajectoryPlanner, SegmentedTrajectoryPlanner
 from ..tools.trajectory_loader import DEFAULT_SEGMENT_DURATION
 from ..statuses.ArmProcessIPC import ArmCommChannel
 from ..statuses.ArmStatus import ArmControllerStatus, ArmErrorStatus
 from ..controllers.arm_state_machine_process import ArmControllerProcessStateMachine
-from hex_device_test.controllers import ErrorChecker
+from hex_device_test.controllers import StateChecker
 
 
 class ArmControllerMpV2(BaseController):
@@ -137,11 +139,12 @@ class ArmControllerMpV2(BaseController):
 
                     # ##TODO: 超时检查
                     
-                    self.error_check()
+                    self.state_check()
                     
-                    self.state_update()
+                    self.state_transition()
 
-                    self.run_tick()
+                    self.update_state_to_flie()
+                    
                     time.sleep(self._task_interval)
 
                 except KeyboardInterrupt:
@@ -168,7 +171,7 @@ class ArmControllerMpV2(BaseController):
     def init_var(self):
         """变量初始化（只赋初值，无需回收）"""
         self._task_interval = 1.0 / self._task_loop_hz
-        self._device: Optional[Arm] = None
+        self._device: Optional[ArmWrapper] = None
         self._trajectory = None
         self._target_pos = None
         self._motor_pos = None
@@ -197,24 +200,24 @@ class ArmControllerMpV2(BaseController):
             self._device_id, self._arm_ipc
         )
         # 设备状态表（温度 / 错误记录）
-        self._device_state = ArmStatusTable()
+        self._device_state = StateChecker()
 
         # 可视化（仅开启时创建 PlotjuggleDraw UDP sender）
         self._sender = None
         if self._enable_view:
             self._sender = PlotjuggleDraw()
             self._sender.start()
-
-        # ── ErrorChecker ──
-        self._error_checker = ErrorChecker()
         
         # HexDeviceApi
-        self._hex_api = HexDeviceApi(
-            ws_url=self._ws_url,
-            local_port=0,
-            enable_kcp=self._enable_kcp,
-        )
-
+        # self._hex_api = HexDeviceApi(
+        #     ws_url=self._ws_url,
+        #     local_port=0,
+        #     enable_kcp=self._enable_kcp,
+        # )
+        
+        self._param = WrapperParams()
+        self._device = ArmWrapper(self._param)
+        
         # 轨迹规划器
         if self._waypoints:
             duration = (self._segment_duration
@@ -259,7 +262,7 @@ class ArmControllerMpV2(BaseController):
             self._temp_csv_writer = csv.writer(self._temp_csv_file)
             print(f"dev{self._device_id}: temperature CSV -> {csv_path}")
 
-    def error_check(self):
+    def state_check(self):
         """
         
         """
@@ -295,7 +298,7 @@ class ArmControllerMpV2(BaseController):
         self._error_checker.update(self._device, self._check_timeout, conn_lost)
         
 
-    def state_update(self):
+    def state_transition(self):
         """
         命令读取 + 状态机 dispatch
 
@@ -321,7 +324,6 @@ class ArmControllerMpV2(BaseController):
             # Ready 状态下启动轨迹（仅首次）
             if self._trajectory:
                 self._trajectory.start_trajectory()
-            self._device._last_command_time = None
 
         elif current_state == ArmControllerStatus.Running:
             self._state_machine.handle_running(self._device, self._target_pos)
@@ -336,7 +338,7 @@ class ArmControllerMpV2(BaseController):
 
         elif current_state == ArmControllerStatus.Exit:
             self._state_machine.handle_exit()
-
+            
     def _update_loop_count(self):
         """分段轨迹循环计数（旧代码 L377-383）"""
         segment_info = self._trajectory.get_current_segment_info()
@@ -348,11 +350,11 @@ class ArmControllerMpV2(BaseController):
                     self._loop_counter += 1
             self._prev_segment_index = segment_info['segment_index']
 
-    def run_tick(self):
+    def update_state_to_flie(self):
         """
         轨迹目标计算 + 温度采集 + CSV 日志 + 可视化
 
-        _target_pos 在本 tick 计算，供下一个 tick 的 state_update() 使用。
+        _target_pos 在本 tick 计算，供下一个 tick 的 state_transition() 使用。
         """
         # ── 1. 轨迹目标 + 电机位置 ──
         self._target_pos = (self._trajectory.get_current_target()

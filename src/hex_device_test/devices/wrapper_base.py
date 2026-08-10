@@ -55,6 +55,7 @@ class WrapperParams(HexRobotBaseParams):
     log_level:      str         = "DEBUG"
     grip_type:      str         = "empty"
     robot_name:     str         = "Archer_y6"
+    robot_type:     int         = 25
     
 
 class WrapperBase(ABC):

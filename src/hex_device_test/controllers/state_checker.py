@@ -46,7 +46,7 @@ class StateChecker:
         self._task_start_time: str = _now_str()
         self._max_error_history = max_error_history
 
-        self._current_state: Dict[str, Any] = self._empty_current_state()
+        # self._current_state: Dict[str, Any] = self._empty_current_state()
         self._summary: Dict[str, Any] = self._empty_summary()
 
     # ── 公共接口 ──
@@ -66,22 +66,24 @@ class StateChecker:
                 conn_lost           : bool      # 默认 False
                 api_exit            : bool      # 默认 False
         """
+        ### TODO: 仅维护一个summary的update。以及 error []
+        
         now_str = _now_str()
 
-        # 刷新 current_state（统一转为 list，兼容 np.ndarray 输入）
-        self._current_state["system_time"] = now_str
-        self._current_state["motor_positions"] = _to_list(data.get("motor_positions"))
-        self._current_state["motor_temps"] = _to_list(data.get("motor_temps"))
-        self._current_state["driver_temps"] = _to_list(data.get("driver_temps"))
-        self._current_state["motor_error_codes"] = _to_list(data.get("motor_error_codes"))
-        self._current_state["robot_mode"] = data.get("robot_mode", "")
-        self._current_state["overtoken_mode"] = data.get("overtoken_mode", "")
-        self._current_state["overtoken_reason"] = data.get("overtoken_reason", "")
-        self._current_state["conn_lost"] = data.get("conn_lost", False)
-        self._current_state["api_exit"] = data.get("api_exit", False)
-        # TODO: 待用户评估 ArmErrorStatus 枚举后，补充具体错误检测逻辑
-        self._current_state["has_error"] = False
-        self._current_state["errors"] = []
+        # # 刷新 current_state（统一转为 list，兼容 np.ndarray 输入）
+        # self._current_state["system_time"] = now_str
+        # self._current_state["motor_positions"] = _to_list(data.get("motor_positions"))
+        # self._current_state["motor_temps"] = _to_list(data.get("motor_temps"))
+        # self._current_state["driver_temps"] = _to_list(data.get("driver_temps"))
+        # self._current_state["motor_error_codes"] = _to_list(data.get("motor_error_codes"))
+        # self._current_state["robot_mode"] = data.get("robot_mode", "")
+        # self._current_state["overtoken_mode"] = data.get("overtoken_mode", "")
+        # self._current_state["overtoken_reason"] = data.get("overtoken_reason", "")
+        # self._current_state["conn_lost"] = data.get("conn_lost", False)
+        # self._current_state["api_exit"] = data.get("api_exit", False)
+        # # TODO: 待用户评估 ArmErrorStatus 枚举后，补充具体错误检测逻辑
+        # self._current_state["has_error"] = False
+        # self._current_state["errors"] = []
 
         # 更新温度 min/max
         self._update_temp_summary(data.get("motor_temps"), now_str,
@@ -93,11 +95,17 @@ class StateChecker:
 
     def is_error(self) -> bool:
         """当前是否有活动错误（占位，当前始终返回 False）"""
+        ### TODO: 以error history作为依据
+        # return self._current_state.get("has_error", False)
         return self._current_state.get("has_error", False)
 
-    def get_current_info(self) -> Dict[str, Any]:
-        """返回当前状态快照（浅拷贝）"""
-        return dict(self._current_state)
+    def update_error(self):
+        ### TODO： summry的error list并没有更新
+        pass
+    
+    # def get_current_info(self) -> Dict[str, Any]:
+    #     """返回当前状态快照（浅拷贝）"""
+    #     return dict(self._current_state)
 
     def get_summary(self) -> Dict[str, Any]:
         """返回累计汇总统计（浅拷贝）"""

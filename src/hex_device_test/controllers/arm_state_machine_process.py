@@ -4,9 +4,8 @@ from typing import List,Optional
 
 from ..statuses.ArmProcessIPC import ArmCommChannel
 from ..statuses.ArmStatus import ArmControllerStatus, ArmCoordinatorStatus, ArmErrorStatus,ArmCmdStatus
-from  ..controllers.ErrorChecker import ArmErrorChecker
 from ..controllers.TrajectoryController import ReturnHomeController
-from hex_device import Arm, CommandType, Hands
+from ..devices.arm_wrapper import ArmWrapper
 
 class ArmCoordinatorProcessStateMachine:
     """
@@ -295,7 +294,7 @@ class ArmControllerProcessStateMachine:
     
     # ========== 状态处理函数 ==========
     
-    def handle_init(self, device: Arm) -> None:
+    def handle_init(self, device: ArmWrapper) -> None:
         """
         初始化状态
         - 执行：上线之后移动到home
@@ -322,7 +321,7 @@ class ArmControllerProcessStateMachine:
         
         target_position, reached_home = self._return_home_controller.get_target_position()
         if target_position is not None:
-            device.motor_command(CommandType.POSITION, target_position.tolist())    
+            device.motor_command("position", target_position.tolist())
         
         # Smooth and check Home
         if reached_home:
@@ -349,7 +348,7 @@ class ArmControllerProcessStateMachine:
         
         # 发送空命令，防止apiTimeout
     
-    def handle_running(self, device: Arm, target_position:Optional[List[float]]) -> None:
+    def handle_running(self, device: ArmWrapper, target_position:Optional[List[float]]) -> None:
         """
         Running状态
         - 执行：执行轨迹
@@ -359,7 +358,7 @@ class ArmControllerProcessStateMachine:
         
         target = target_position
         if target is not None and hasattr(target,"tolist"):
-            device.motor_command(CommandType.POSITION, target.tolist())
+            device.motor_command("position", target.tolist())
         
         # check cmd
         if self._check_cmd(ArmCmdStatus.STOPPED):
@@ -370,7 +369,7 @@ class ArmControllerProcessStateMachine:
             self.transition(ArmControllerStatus.Brake, "接收到BRAKE命令")
             return
         
-    def handle_stopped(self, device: Arm, last_cmd_position:Optional[List[float]]) -> None:
+    def handle_stopped(self, device: ArmWrapper, last_cmd_position:Optional[List[float]]) -> None:
         """
         Stopped状态
         - 执行：返回home
@@ -397,7 +396,7 @@ class ArmControllerProcessStateMachine:
         # 获取平滑归位目标位置
         target_position, reached_home = self._return_home_controller.get_target_position()
         if hasattr(target_position,"tolist"):
-            device.motor_command(CommandType.POSITION, target_position.tolist())
+            device.motor_command("position", target_position.tolist())
         
         # check home
         if reached_home:
@@ -410,14 +409,14 @@ class ArmControllerProcessStateMachine:
             self.transition(ArmControllerStatus.Exit, "stopped time out")
 
             
-    def handle_brake(self, device: Arm) -> None:
+    def handle_brake(self, device: ArmWrapper) -> None:
         """
         Brake状态
         - 执行：锁定当前位置
         - 转移：命令为STOPPED → Exit
         """
         # 锁定位置
-        device.motor_command(CommandType.BRAKE, [True] * device.motor_count)
+        device.motor_command("brake", [True] * device.motor_count)
         
         if self._check_cmd(ArmCmdStatus.STOPPED):
             err_state = ArmErrorStatus(self._arm_ipc.get_error_status())

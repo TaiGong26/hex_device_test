@@ -19,9 +19,11 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from hex_driver_robot.robot_archer_y6.robot import (
+from hex_driver_robot import (
     HexRobotArcherY6Callback,
     HexRobotArcherY6Params,
+    HexRobotFireflyY6Callback,
+    HexRobotFireflyY6Params,
 )
 
 from .wrapper_base import WrapperBase, WrapperParams, GRIP_INFO_MAP
@@ -231,6 +233,11 @@ class ArmWrapper(WrapperBase):
     def raw_device(self) -> Optional[Any]:
         """原始机器人对象（HexRobotArcherY6Callback）"""
         return self._robot
+
+    @property
+    def motor_count(self) -> int:
+        """电机数量"""
+        return self._motor_count
 
     # ==================================================================
     # API — 控制命令
