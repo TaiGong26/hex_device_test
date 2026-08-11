@@ -29,13 +29,12 @@ class ArmCoordinatorV2(BaseCoordinator):
 
     def __init__(self, device_ws_url_list: Optional[List[str]] = None,
                  enable_kcp: bool = False,
-                 arm_config: Optional[dict] = None,
+                #  arm_config: Optional[dict] = None,
                  robot_type: str = "Archer_y6",
                  waypoints: Optional[List[list]] = None,
                  segment_duration: Optional[float] = None,
-                 segment_ends: Optional[List[int]] = None,
-                 time_sleep: float = 0.0,
-                 interpolate: bool = True,
+                 interpolate: str = 'linear',
+                 timestamps: Optional[List[float]] = None,
                  enable_view: bool = False,
                  check_timeout: bool = False,
                  temp_csv_dir: Optional[str] = None):
@@ -46,9 +45,8 @@ class ArmCoordinatorV2(BaseCoordinator):
         self._robot_type = robot_type
         self._waypoints = waypoints
         self._segment_duration = segment_duration
-        self._segment_ends = segment_ends
-        self._time_sleep = time_sleep
         self._interpolate = interpolate
+        self._timestamps = timestamps
         self._enable_view = enable_view
         self._check_timeout = check_timeout
         self._temp_csv_dir = temp_csv_dir
@@ -70,9 +68,9 @@ class ArmCoordinatorV2(BaseCoordinator):
         self._task: Optional[threading.Thread] = None
 
         # 启动
-        self._start(device_ws_url_list, enable_kcp, arm_config, robot_type)
+        self._start(device_ws_url_list, enable_kcp, robot_type)
 
-    def _start(self, device_ws_url_list, enable_kcp, arm_config, robot_type):
+    def _start(self, device_ws_url_list, enable_kcp, robot_type):
         """
         （内部）启动所有控制器
 
@@ -94,15 +92,12 @@ class ArmCoordinatorV2(BaseCoordinator):
                 enable_kcp=enable_kcp,
                 task_loop_hz=500,
                 arm_ipc=device_ipc,
-                arm_config=arm_config,
                 robot_type=robot_type,
                 waypoints=self._waypoints,
+                timestamps=self._timestamps,
                 segment_duration=self._segment_duration,
-                segment_ends=self._segment_ends,
-                time_sleep=self._time_sleep,
                 interpolate=self._interpolate,
                 enable_view=self._enable_view,
-                check_timeout=self._check_timeout,
                 mp_queue=self._mp_queue,
                 temp_csv_dir=self._temp_csv_dir,
             )

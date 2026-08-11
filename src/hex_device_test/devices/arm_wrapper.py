@@ -344,17 +344,6 @@ class ArmWrapper(WrapperBase):
         else:
             self._log_err(f"Unknown command_type: {command_type}")
 
-    def reset_last_command_time(self) -> None:
-        """重置最后命令时间（robot 层中命令持久化，此方法效果受限）
-
-        robot 层的 __cur_cmd 持久化机制使最后一个命令持续循环发送，
-        无法通过外部直接清空内部命令缓存。当前为 no-op。
-        """
-        self._log_warn(
-            "reset_last_command_time: robot 层命令自动持久化，无法重置。"
-            "发送新命令即可替换当前缓存。"
-        )
-
     # ==================================================================
     # API — Grip 控制
     # ==================================================================

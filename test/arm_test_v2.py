@@ -13,12 +13,8 @@ from pathlib import Path
 
 
 from hex_device_test.managers.ArmCoordinatorV2 import ArmCoordinatorV2 as ArmCoordinator
-from hex_device_test.tools.trajectory_loader import (
-    DEFAULT_SEGMENT_DURATION,
-    estimate_waypoints_memory_mb,
-    get_replay_segment_duration,
-    load_waypoints_with_segment_boundaries,
-)
+from hex_device_test.controllers.TrajectoryController import DEFAULT_SEGMENT_DURATION
+from hex_device_test.tools.PointLoader import TaskConfigLoader
 
 
 DEFAULT_ARM_POSITION = [
@@ -63,41 +59,21 @@ def main():
     )
 
     parser.add_argument(
-        '--timeout',
-        action='store_true',
-        default=False,
-        help='Enable API timeout check.'
-    )
-
-    parser.add_argument(
-        '--points-json',
+        '--traj-json',
         type=Path,
-        nargs='+',
         default=None,
         metavar='JSON',
-        help='One or more recorded trajectory JSON files; waypoints are concatenated in order'
+        help='arm_record 录制的轨迹 JSON（TaskConfigLoader 格式），单文件；'
+             '缺省用内置 DEFAULT_ARM_POSITION'
     )
 
     parser.add_argument(
-        '--stride',
-        type=int,
-        default=1,
-        help='Sample every N frames when loading --points-json (default: 1)'
-    )
-
-    parser.add_argument(
-        '--time-sleep',
-        type=float,
-        default=0.0,
-        metavar='SECONDS',
-        help='Seconds to hold init_pos between trajectory segments when using --points-json (default: 0, 0 to skip return and hold)'
-    )
-
-    parser.add_argument(
-        '--raw',
-        action='store_true',
-        default=False,
-        help='Replay waypoints as-is without S-curve interpolation between points'
+        '--interp',
+        type=str,
+        choices=['s_curve', 'linear'],
+        default='linear',
+        metavar='MODE',
+        help='轨迹插值方式: s_curve=S曲线平滑, linear=线性（默认 linear）'
     )
 
     parser.add_argument(
@@ -127,56 +103,23 @@ def main():
     print(f"Device IP list: {dev_ip_list}")
     enable_kcp = args.KCP
     enable_view = args.view
-    check_timeout = args.timeout
     temp_csv_dir = args.temp_csv_dir
-    time_sleep = args.time_sleep
-    interpolate = not args.raw
-    segment_ends = None
+    interpolate = args.interp
+    timestamps = None
 
-    config_dict = {
-        'name': 'Archer_d6y',
-        'dof_num': 'six_axis',
-        'motor_model': [0x80] * 6,
-        'joints': [{
-            'joint_name': 'joint_1',
-            'joint_limit': [-2.7, 2.7, -1.0, 1.0, 0.0, 0.0]
-        }, {
-            'joint_name': 'joint_2',
-            'joint_limit': [-1.57, 2.094, -1.0, 1.0, 0.0, 0.0]
-        }, {
-            'joint_name': 'joint_3',
-            'joint_limit': [0.0, 3.14159265359, -1.0, 1.0, 0.0, 0.0]
-        }, {
-            'joint_name': 'joint_4',
-            'joint_limit': [-1.5, 1.5, -1.0, 1.0, 0.0, 0.0]
-        }, {
-            'joint_name': 'joint_5',
-            'joint_limit': [-1.56, 1.56, -1.5, 1.5, 0.0, 0.0]
-        }, {
-            'joint_name': 'joint_6',
-            'joint_limit': [-1.57, 1.57, -1.5, 1.5, 0.0, 0.0]
-        }]
-    }
-
-    if args.points_json is not None:
-        for json_path in args.points_json:
-            if not json_path.is_file():
-                print(f"Error: points JSON not found: {json_path}")
-                return
-        arm_position, segment_ends = load_waypoints_with_segment_boundaries(
-            args.points_json, stride=args.stride
-        )
-        segment_duration = get_replay_segment_duration(args.points_json, stride=args.stride)
-        mem_mb = estimate_waypoints_memory_mb(len(arm_position))
-        print(f"Loaded {len(arm_position)} waypoints from {len(args.points_json)} file(s)")
-        for idx, json_path in enumerate(args.points_json):
-            end_idx = segment_ends[idx] - 1
-            print(f"  - {json_path} (segment {idx + 1} end waypoint index: {end_idx})")
+    if args.traj_json is not None:
+        if not args.traj_json.is_file():
+            print(f"Error: trajectory JSON not found: {args.traj_json}")
+            return
+        loader = TaskConfigLoader(config_path=str(args.traj_json))
+        arm_position = loader.get_waypoints()
+        timestamps = loader.get_timestamps()
+        duration_s = loader.raw_points[-1]['ts_ns'] * 1e-9
         print(
-            f"stride={args.stride}, segment_duration={segment_duration}s, "
-            f"time_sleep={time_sleep}s, interpolate={interpolate}, "
-            f"estimated waypoints memory ~{mem_mb:.2f} MB"
+            f"Loaded {len(arm_position)} waypoints from {args.traj_json} "
+            f"(duration={duration_s:.3f}s, interpolate={interpolate})"
         )
+        # ###TODO: grip_waypoints = loader.get_grip_position() —— 夹爪回放第 3 轮范围外
     else:
         arm_position = DEFAULT_ARM_POSITION
         segment_duration = DEFAULT_SEGMENT_DURATION
@@ -191,18 +134,14 @@ def main():
         coordinator = ArmCoordinator(
             dev_ip_list,
             enable_kcp,
-            arm_config=config_dict,
             robot_type=args.robot_type,
             waypoints=arm_position,
+            timestamps=timestamps,
             segment_duration=segment_duration,
-            segment_ends=segment_ends,
-            time_sleep=time_sleep,
             interpolate=interpolate,
             enable_view=enable_view,
-            check_timeout=check_timeout,
             temp_csv_dir=temp_csv_dir,
         )
-
 
         while True:
             k = input()
@@ -211,7 +150,6 @@ def main():
             
     except KeyboardInterrupt:
         print("keyboard interrupt")
-        # stop_event.set()
     except Exception as e:
         print(f"main error: {e}")
         traceback.print_exc()

@@ -1,34 +1,10 @@
-"""StateChecker — 设备状态聚合与检查
-
-设计意图：
-  维护 current_state（实时快照）、summary（累计统计：温度 min/max + 时间戳，
-  错误历史 + 时间戳）。update() 接收原始 data dict，不绑定数据源。
-
-TODO(arm_wrapper np 改造后)：arm_wrapper getter 改为返回 np.ndarray 后，
-  state_checker 内部 vals 转换需使用 np.asarray 而非 list comprehension，
-  减少逐元素迭代开销。
-"""
-
 import time
 from typing import Any, Dict, List, Optional
 
 
 def _now_str() -> str:
-    """带微秒的系统时间字符串"""
     t = time.time()
     return f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(t))}.{int((t % 1) * 1_000_000):06d}"
-
-
-def _to_list(val):
-    """将 np.ndarray 或其他可迭代对象转为 list，None 保持不变"""
-    if val is None:
-        return None
-    if hasattr(val, 'tolist'):
-        return val.tolist()
-    if isinstance(val, (list, tuple)):
-        return list(val)
-    return val
-
 
 class StateChecker:
     """状态检查器
@@ -69,7 +45,6 @@ class StateChecker:
                 conn_lost           : bool      # 默认 False
                 api_exit            : bool      # 默认 False
         """
-        ### TODO: 仅维护一个summary的update。以及 error []
         
         now_str = _now_str()
         # 更新温度 min/max
@@ -83,7 +58,6 @@ class StateChecker:
     def is_error(self) -> bool:
         """直接判断错误历史队列中是否有错误"""
         return len(self._error_history) > 0
-
 
     def update_error(
         self,
@@ -125,9 +99,6 @@ class StateChecker:
             "time": _now_str(),
         })
 
-    # def get_current_info(self) -> Dict[str, Any]:
-    #     """返回当前状态快照（浅拷贝）"""
-    #     return dict(self._current_state)
 
     def get_summary(self) -> Dict[str, Any]:
         """返回累计汇总统计（浅拷贝）

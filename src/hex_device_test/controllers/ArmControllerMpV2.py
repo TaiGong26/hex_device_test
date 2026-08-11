@@ -36,8 +36,11 @@ from hex_device_test.devices.arm_wrapper import ArmWrapper
 from hex_device_test.devices.wrapper_base import WrapperParams
 from ..tools.plotjuggle import PlotjuggleDraw
 from .BaseController import BaseController
-from .TrajectoryController import TrajectoryPlanner, SegmentedTrajectoryPlanner
-from ..tools.trajectory_loader import DEFAULT_SEGMENT_DURATION
+from .TrajectoryController import (
+    DEFAULT_SEGMENT_DURATION,
+    TimestampsTrajectoryPlanner,
+    TrajectoryPlanner,
+)
 from ..statuses.ArmProcessIPC import ArmCommChannel
 from ..statuses.ArmStatus import ArmControllerStatus, ArmErrorStatus
 from ..controllers.arm_state_machine_process import ArmControllerProcessStateMachine
@@ -48,36 +51,32 @@ class ArmControllerMpV2(BaseController):
 
     def __init__(self, ws_url: str, device_id: int = 0, enable_kcp: bool = False,
                  task_loop_hz: int = 500, arm_ipc: Optional[ArmCommChannel] = None,
-                 arm_config: Optional[dict] = None,
                  robot_type: str = "Archer_y6",
                  waypoints: Optional[list] = None,
                  segment_duration: Optional[float] = None,
-                 segment_ends: Optional[list] = None,
-                 time_sleep: float = 0.0, interpolate: bool = True,
+                 interpolate: str = 'linear',
+                 timestamps: Optional[list] = None,
                  mp_queue: Optional[mp.Queue] = None,
                  temp_csv_dir: Optional[str] = None,
                  enable_view: bool = False, check_timeout: bool = False,
-                 connect_timeout: float = 30.0,):
+                 ):
         super().__init__(ws_url, 0, enable_kcp, task_loop_hz, device_id)
 
         # 模块/设备配置
         self._arm_ipc = arm_ipc
-        self._arm_config = arm_config
         self._robot_type = robot_type
 
         # 轨迹配置
         self._waypoints = waypoints
         self._segment_duration = segment_duration
-        self._segment_ends = segment_ends
-        self._time_sleep = time_sleep
         self._interpolate = interpolate
+        self._timestamps = timestamps
 
         # 运行配置
         self._mp_queue = mp_queue
         self._temp_csv_dir = temp_csv_dir
         self._enable_view = enable_view
         self._check_timeout = check_timeout
-        self._connect_timeout = connect_timeout
 
         # 进程控制
         self._loop_running = mp.Event()
@@ -163,7 +162,6 @@ class ArmControllerMpV2(BaseController):
         self._target_pos = None
         self._motor_pos = None
         self._last_pos = None
-        self._connect_timeout_elapsed = 0.0
         self._loop_counter = 0
         self._prev_segment_index = None
         self._last_temp_log_time = 0.0
@@ -208,35 +206,33 @@ class ArmControllerMpV2(BaseController):
         self._device = ArmWrapper(params=param)
         
         # 轨迹规划器
-        if self._waypoints:
+        if self._timestamps:
+            # 录制轨迹 → 时间戳驱动 + 循环（耐久性）
+            self._trajectory = TimestampsTrajectoryPlanner(
+                waypoints=self._waypoints,
+                timestamps=self._timestamps,
+                interpolate=self._interpolate,
+                loop=True,
+            )
+            print(
+                f"dev{self._device_id}: recorded trajectory, "
+                f"{len(self._waypoints)} waypoints, "
+                f"interpolate={self._interpolate}, loop=True"
+            )
+        elif self._waypoints:
+            # 默认轨迹 → 均匀段时长驱动
             duration = (self._segment_duration
                         if self._segment_duration is not None
                         else DEFAULT_SEGMENT_DURATION)
-            if self._segment_ends:
-                self._trajectory = SegmentedTrajectoryPlanner(
-                    waypoints=self._waypoints,
-                    segment_ends=self._segment_ends,
-                    segment_duration=duration,
-                    hold_duration=self._time_sleep if self._time_sleep is not None else 0.0,
-                    interpolate=self._interpolate,
-                )
-                print(
-                    f"dev{self._device_id}: segmented trajectory, "
-                    f"{len(self._segment_ends)} segment(s), "
-                    f"segment_duration={duration}s, time_sleep={self._time_sleep}s, "
-                    f"interpolate={self._interpolate}, "
-                    f"segment_ends={self._segment_ends}"
-                )
-            else:
-                self._trajectory = TrajectoryPlanner(
-                    waypoints=self._waypoints,
-                    segment_duration=duration,
-                    interpolate=self._interpolate,
-                )
-                print(
-                    f"dev{self._device_id}: trajectory segment_duration={duration}s, "
-                    f"interpolate={self._interpolate}"
-                )
+            self._trajectory = TrajectoryPlanner(
+                waypoints=self._waypoints,
+                segment_duration=duration,
+                interpolate=self._interpolate,
+            )
+            print(
+                f"dev{self._device_id}: trajectory segment_duration={duration}s, "
+                f"interpolate={self._interpolate}"
+            )
 
         # CSV 日志文件（header 推迟到 error_check 发现设备后写入）
 
@@ -319,6 +315,8 @@ class ArmControllerMpV2(BaseController):
 
         elif current_state == ArmControllerStatus.Running:
             self._state_machine.handle_running(self._device, self._target_pos)
+            # ###TODO: 夹爪回放 —— 第 3 轮范围外，后续在 handle_running 增加
+            #           grip_motor_command("position", grip_target)（grip 目标来自规划器）
             if self._trajectory:
                 self._update_loop_count()
 

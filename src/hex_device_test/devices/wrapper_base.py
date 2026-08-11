@@ -134,8 +134,3 @@ class WrapperBase(ABC):
     @abstractmethod
     def motor_command(self, target: Any) -> None:
         """发送位置控制命令"""
-
-
-    @abstractmethod
-    def reset_last_command_time(self) -> None:
-        """重置最后命令时间戳"""
