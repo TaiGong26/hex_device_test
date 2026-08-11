@@ -157,7 +157,6 @@ class ArmControllerMpV2(BaseController):
         finally:
             self._close()
 
-    # ==================== 方法拆分 ====================
 
     def init_var(self):
         """变量初始化（只赋初值，无需回收）"""
@@ -200,11 +199,15 @@ class ArmControllerMpV2(BaseController):
             self._sender.start()
         
         # 设备接入：ArmWrapper（hex_driver_robot 后端），接收一个 WrapperParams
+        # host/port 从 self._ws_url（ws://host:port）解析，透传到底层驱动
+        host, port = self._parse_ws_url(self._ws_url)
         param = WrapperParams(
             enable_kcp=self._enable_kcp,
             log_level="DEBUG",
             grip_type="empty",
             robot_name=self._robot_type,
+            host=host,
+            port=port,
         )
         self._device = ArmWrapper(params=param)
         
@@ -263,9 +266,9 @@ class ArmControllerMpV2(BaseController):
                           if self._trajectory else None)
         
         # temperature update
-        motor_temps = self._device.get_motor_temperatures()
-        driver_temps = self._device.get_motor_driver_temperatures()
-        self._device_state.update(motor_temps, driver_temps)
+        mt = self._device.get_motor_temperatures()
+        dt = self._device.get_motor_driver_temperatures()
+        self._device_state.update({"motor_temps": mt, "driver_temps": dt})
 
         # error check
         grip_err = (
@@ -439,3 +442,31 @@ class ArmControllerMpV2(BaseController):
                 self._hex_api.close()
             except Exception:
                 pass
+            
+            
+    # ==================== helper ====================
+
+    @staticmethod
+    def _parse_ws_url(url: str):
+        """从 ws://host:port 简单分割解析 (host, port)
+
+        用户指定"只做分割"：去掉 ws:// 前缀后按最后一个 ':' 切分。
+        host 缺失时回退默认 192.168.1.100，port 缺失时回退默认 8439。
+        注意：IPv6/interface 形式（如 ws://[::1%eth0]:8439）用简单分割不完整，
+        非本轮目标，如需支持请改用 urlparse。
+        """
+        host = "192.168.1.100"
+        port = 8439
+        if not url:
+            return host, port
+        body = url[len("ws://"):] if url.startswith("ws://") else url
+        if ":" in body:
+            h, _, p = body.rpartition(":")
+            if h:
+                host = h
+            if p.isdigit():
+                port = int(p)
+        else:
+            if body:
+                host = body
+        return host, port

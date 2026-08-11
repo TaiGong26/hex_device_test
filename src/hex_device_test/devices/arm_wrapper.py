@@ -284,6 +284,8 @@ class ArmWrapper(WrapperBase):
                 return
             self._robot.set_arm_pos_cmd({
                 "jnt_pos": [float(v) for v in values],
+                "lim_vel": 10.0,
+                "lim_acc": 10,
             })
 
         elif command_type == "brake":
@@ -347,15 +349,11 @@ class ArmWrapper(WrapperBase):
             val = self._cache["jnt_pos"]
             return val.copy().tolist() if val is not None else None
 
-    def get_motor_temperatures(self) -> tuple:
+    def get_motor_temperatures(self) -> Optional[list]:
         """(motor_temps, driver_temps)，每个元素 Optional[list]"""
         with self._cache_lock:
-            mt = self._cache["motor_temps"]
-            dt = self._cache["driver_temps"]
-            return (
-                mt.copy().tolist() if mt is not None else None,
-                dt.copy().tolist() if dt is not None else None,
-            )
+            val = self._cache["motor_temps"]
+            return val.copy().tolist() if val is not None else None,
 
     def get_motor_driver_temperatures(self) -> Optional[list]:
         """驱动温度列表"""
