@@ -18,7 +18,6 @@ run()
   - 所有配置通过构造函数传入，无 setter
   - poll(timeout=0) 替代 poll(0.01)，消除 10ms 阻塞
   - daemon=True 移除
-  - _consecutive_errors 计数，连续 N 次异常后退出（旧版无限重试）
   - PlotjuggleDraw 仅在 enable_view=True 时创建
 """
 
@@ -58,8 +57,7 @@ class ArmControllerMpV2(BaseController):
                  mp_queue: Optional[mp.Queue] = None,
                  temp_csv_dir: Optional[str] = None,
                  enable_view: bool = False, check_timeout: bool = False,
-                 connect_timeout: float = 30.0,
-                 max_consecutive_errors: int = 10):
+                 connect_timeout: float = 30.0,):
         super().__init__(ws_url, 0, enable_kcp, task_loop_hz, device_id)
 
         # 模块/设备配置
@@ -80,7 +78,6 @@ class ArmControllerMpV2(BaseController):
         self._enable_view = enable_view
         self._check_timeout = check_timeout
         self._connect_timeout = connect_timeout
-        self._max_consecutive_errors = max_consecutive_errors
 
         # 进程控制
         self._loop_running = mp.Event()
@@ -153,7 +150,7 @@ class ArmControllerMpV2(BaseController):
                 except Exception as e:
                     print(f"[Dev {self._device_id}] 循环异常: {e}")
                     self._arm_ipc.set_error_status(ArmErrorStatus.ProcessError.value)
-                
+                    traceback.print_exc()
         finally:
             self._close()
 
@@ -170,7 +167,6 @@ class ArmControllerMpV2(BaseController):
         self._loop_counter = 0
         self._prev_segment_index = None
         self._last_temp_log_time = 0.0
-        self._consecutive_errors = 0
         self._loop_initialized = False
         
         # 组件
@@ -203,7 +199,7 @@ class ArmControllerMpV2(BaseController):
         host, port = self._parse_ws_url(self._ws_url)
         param = WrapperParams(
             enable_kcp=self._enable_kcp,
-            log_level="DEBUG",
+            log_level="ERROR",  # 临时屏蔽 driver DEBUG/INFO 刷屏（原 "DEBUG"）
             grip_type="empty",
             robot_name=self._robot_type,
             host=host,
@@ -271,17 +267,28 @@ class ArmControllerMpV2(BaseController):
         self._device_state.update({"motor_temps": mt, "driver_temps": dt})
 
         # error check
+        arm_err = self._device.get_motor_error_codes()
+        
         grip_err = (
             self._device.get_grip_motor_error_codes()
             if self._device.has_grip() else None
         )
+        robot_mode = self._device.get_arm_robot_mode()
         self._device_state.update_error(
-            arm_err=self._device.get_motor_error_codes(),
+            arm_err=arm_err,
             grip_err=grip_err,
-            robot_mode=self._device.get_arm_robot_mode(),
+            robot_mode=robot_mode,
         )
 
-        
+        # 设备错误 → 上报 IPC error_status（coordinator 每 10ms 轮询读取）
+        # arm/grip 电机错误 → MotorError；robot_mode 被接管/致命错误 → ArmError
+        if self._arm_ipc.get_error_status() == ArmErrorStatus.Normal.value:
+            if (arm_err and any(arm_err)) or (grip_err and any(grip_err)):
+                self._arm_ipc.set_error_status(ArmErrorStatus.MotorError.value)
+                print(f"[Dev {self._device_id}] error detected -> error_status=MotorError")
+            elif robot_mode in ("RmOvertaken", "RmFatalError"):
+                self._arm_ipc.set_error_status(ArmErrorStatus.ArmError.value)
+                print(f"[Dev {self._device_id}] error detected -> error_status=ArmError")
 
     def state_transition(self):
         """

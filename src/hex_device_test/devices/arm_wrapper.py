@@ -156,6 +156,7 @@ class ArmWrapper(WrapperBase):
 
             # ⑥ 启动 work_loop 线程（callback 的 __init__ 仅构建线程，不启动）
             self._robot.start()
+
             self._log_info("ArmWrapper initialized")
 
         except Exception as e:
@@ -181,6 +182,50 @@ class ArmWrapper(WrapperBase):
                 self._cache["grip_motor_temps"] = np.full(grip_dof, np.nan)
                 self._cache["grip_driver_temps"] = np.full(grip_dof, np.nan)
                 self._cache["grip_error_codes"] = [[] for _ in range(grip_dof)]
+
+        # 预分配完成后，在锁外同步读一次机械臂真实状态填入缓存。
+        self._snapshot_current_state()
+
+    def _snapshot_current_state(self):
+        """预分配后同步读一次机械臂/夹爪真实状态填入缓存。
+
+        消除 init 竞态：init_robot 返回前，work_loop 可能尚未派发第一次
+        *_state_cb，此时 _cache 仍是占位全零。这里直接同步读底层缓存，
+        保证 init 返回后 get_motor_positions() 立即返回真实位置（而非
+        [0,0,0,0,0,0]），避免手柄被命令拉到错误的全零起步点。
+        """
+        if self._robot is None:
+            return
+        with self._cache_lock:
+            arm = self._robot.get_arm_motor_status()
+            if arm is not None:
+                if arm.get("pos") is not None:
+                    self._cache["jnt_pos"][:] = arm["pos"]
+                if arm.get("vel") is not None:
+                    self._cache["jnt_vel"][:] = arm["vel"]
+                if arm.get("eff") is not None:
+                    self._cache["jnt_torque"][:] = arm["eff"]
+                if arm.get("motor_temp") is not None:
+                    self._cache["motor_temps"][:] = arm["motor_temp"]
+                if arm.get("driver_temp") is not None:
+                    self._cache["driver_temps"][:] = arm["driver_temp"]
+                if arm.get("error") is not None:
+                    self._cache["error_codes"][:] = arm["error"]
+            if self._cache.get("grip_jnt_pos") is not None:
+                grip = self._robot.get_grip_motor_status()
+                if grip is not None:
+                    if grip.get("pos") is not None:
+                        self._cache["grip_jnt_pos"][:] = grip["pos"]
+                    if grip.get("vel") is not None:
+                        self._cache["grip_jnt_vel"][:] = grip["vel"]
+                    if grip.get("eff") is not None:
+                        self._cache["grip_jnt_eff"][:] = grip["eff"]
+                    if grip.get("motor_temp") is not None:
+                        self._cache["grip_motor_temps"][:] = grip["motor_temp"]
+                    if grip.get("driver_temp") is not None:
+                        self._cache["grip_driver_temps"][:] = grip["driver_temp"]
+                    if grip.get("error") is not None:
+                        self._cache["grip_error_codes"] = [e.copy() for e in grip["error"]]
 
     def start(self) -> bool:
         """兼容性保留"""
@@ -353,7 +398,7 @@ class ArmWrapper(WrapperBase):
         """(motor_temps, driver_temps)，每个元素 Optional[list]"""
         with self._cache_lock:
             val = self._cache["motor_temps"]
-            return val.copy().tolist() if val is not None else None,
+            return val.copy().tolist() if val is not None else None
 
     def get_motor_driver_temperatures(self) -> Optional[list]:
         """驱动温度列表"""

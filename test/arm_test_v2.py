@@ -20,38 +20,15 @@ from hex_device_test.tools.trajectory_loader import (
     load_waypoints_with_segment_boundaries,
 )
 
-# clean up
-def cleanup(coordinator):
-    print("cleanup")
-    # cleanup 期间屏蔽中断信号，防止机械臂返回过程中被强制终止
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-    signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    try:
-        coordinator.shutdown()
-        print("coordinator shutdown")
-        coordinator._stop_event.wait()
-    finally:
-        # 恢复默认处理（程序即将退出，主要是给子线程清理兜底）
-        signal.signal(signal.SIGINT, signal.SIG_DFL)
-        signal.signal(signal.SIGTERM, signal.SIG_DFL)
-
-# 信号处理回调
-def signal_handler(sig, frame, stop_event: threading.Event):
-    print(f"[Signal] {sig} received, exit")
-    stop_event.set()
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-    signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    print("---------------------------------- signal handler ----------------------------------")
-    return
 
 DEFAULT_ARM_POSITION = [
     [-0.75, -0.25, 3.0, -1.5, 0, 0],
-    [-0.75, 1.35, 0, 1.5, 0, 2.5],
+    [-0.75, 1.2, 0, 1.5, 0, 2.5],
     [-0.75, -0.25, 3.0, -1.5, 0, 0],
     [-2.00, -0.25, 3.0, -1.5, -1.5, 0],
     [2.00, -0.25, 3.0, -1.5, 1.5, 0],
     [0.75, -0.25, 3.0, -1.5, 0, 0],
-    [0.75, -1.5, 1.5, 1.5, 0, -2.5],
+    [0.75, -1.2, 1.5, 1.5, 0, -2.5],
     [0.75, -0.25, 3.0, -1.5, 0, 0],
 ]
 
@@ -208,8 +185,8 @@ def main():
             f"segment_duration={segment_duration}s, interpolate={interpolate})"
         )
 
-    stop_event = threading.Event()
     coordinator = None
+
     try:
         coordinator = ArmCoordinator(
             dev_ip_list,
@@ -226,27 +203,24 @@ def main():
             temp_csv_dir=temp_csv_dir,
         )
 
-        # 信号处理
-        signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, stop_event))
-        signal.signal(signal.SIGTERM, lambda sig, frame: signal_handler(sig, frame, stop_event))
 
-        stop_event.wait()
-
+        while True:
+            k = input()
+            if k == 'q' or k=='Q':
+                break
+            
     except KeyboardInterrupt:
         print("keyboard interrupt")
-
+        # stop_event.set()
     except Exception as e:
         print(f"main error: {e}")
         traceback.print_exc()
     finally:
-        # 恢复默认信号处理
-        signal.signal(signal.SIGINT, signal.SIG_DFL)
-        signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
-        if coordinator is not None:
-            cleanup(coordinator)
-        print("[finally] you can try a gain ctrl c to exit the terminal")
+        coordinator.shutdown()
         sys.exit(0)
+        
+        
 
 if __name__ == "__main__":
     main()
