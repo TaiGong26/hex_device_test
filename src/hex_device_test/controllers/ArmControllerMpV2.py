@@ -28,6 +28,7 @@ import time
 import traceback
 import csv
 import os
+import signal
 from typing import Optional, List
 import multiprocessing as mp
 
@@ -117,6 +118,12 @@ class ArmControllerMpV2(BaseController):
         init_mod 在 try 内执行，失败则设 _loop_initialized=False，
         跳过主循环直接进入 finally _close()，确保资源回收。
         """
+        # 子进程与父进程同属一个进程组：父进程 Ctrl+C 时本进程也会收到 SIGINT。
+        # 显式忽略 SIGINT —— 子进程生命周期完全由父进程 shutdown() 控制
+        # （Event → join → terminate），避免 init_mod 阻塞建连 / sleep 期间
+        # 被 KeyboardInterrupt 中途打断、跳过 finally _close() 资源回收。
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+
         self.init_var()
 
         try:
@@ -143,7 +150,7 @@ class ArmControllerMpV2(BaseController):
                     time.sleep(self._task_interval)
 
                 except KeyboardInterrupt:
-                    # 子进程中忽略 Ctrl+C（由父进程信号处理控制生命周期）
+                    # 安全兜底：SIGINT 已在 run() 入口进程级忽略，此处防御程序性抛出的 KeyboardInterrupt
                     pass
 
                 except Exception as e:

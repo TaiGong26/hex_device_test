@@ -13,8 +13,9 @@ from pathlib import Path
 
 
 from hex_device_test.managers.ArmCoordinatorV2 import ArmCoordinatorV2 as ArmCoordinator
-from hex_device_test.controllers.TrajectoryController import DEFAULT_SEGMENT_DURATION
+from hex_device_test.controllers.TrajectoryController import DEFAULT_SEGMENT_DURATION, CLOSURE_ERR_THRESHOLD
 from hex_device_test.tools.PointLoader import TaskConfigLoader
+
 
 
 DEFAULT_ARM_POSITION = [
@@ -106,6 +107,7 @@ def main():
     temp_csv_dir = args.temp_csv_dir
     interpolate = args.interp
     timestamps = None
+    segment_duration = DEFAULT_SEGMENT_DURATION  # 修复 --traj-json 分支此前未赋值导致 NameError
 
     if args.traj_json is not None:
         if not args.traj_json.is_file():
@@ -113,8 +115,18 @@ def main():
             return
         loader = TaskConfigLoader(config_path=str(args.traj_json))
         arm_position = loader.get_waypoints()
+        if len(arm_position) < 2:
+            print(f"Error: 轨迹点数不足（{len(arm_position)} < 2），无法循环回放")
+            return
         timestamps = loader.get_timestamps()
         duration_s = loader.raw_points[-1]['ts_ns'] * 1e-9
+        # 非闭合路径提示：首末点关节偏差过大时，循环闭合段会被动态放慢
+        closure_err = max(abs(a - b) for a, b in zip(arm_position[-1], arm_position[0]))
+        if closure_err > CLOSURE_ERR_THRESHOLD:
+            print(
+                f"[INFO] 首末点不闭合(E={closure_err:.3f}rad)，循环闭合段将自动延长"
+                f"（时长随偏差增大，≤2.5s）；建议把最后一个录制点摆回起点再按 r"
+            )
         print(
             f"Loaded {len(arm_position)} waypoints from {args.traj_json} "
             f"(duration={duration_s:.3f}s, interpolate={interpolate})"
@@ -122,7 +134,6 @@ def main():
         # ###TODO: grip_waypoints = loader.get_grip_position() —— 夹爪回放第 3 轮范围外
     else:
         arm_position = DEFAULT_ARM_POSITION
-        segment_duration = DEFAULT_SEGMENT_DURATION
         print(
             f"Using default trajectory ({len(arm_position)} waypoints, "
             f"segment_duration={segment_duration}s, interpolate={interpolate})"
@@ -150,6 +161,7 @@ def main():
             
     except KeyboardInterrupt:
         print("keyboard interrupt")
+        
     except Exception as e:
         print(f"main error: {e}")
         traceback.print_exc()

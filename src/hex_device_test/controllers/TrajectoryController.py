@@ -3,6 +3,13 @@ import numpy as np
 
 DEFAULT_SEGMENT_DURATION = 2.5   # 迁自 tools/trajectory_loader.py（旧格式加载器已删除）
 
+# ==== 循环闭合段参数（宏定义，便于调参）====
+CLOSURE_ERR_THRESHOLD     = 0.15    # rad：首末关节最大偏差阈值，≤ 用近闭合带
+CLOSURE_DUR_NEAR_MAX      = 1.0     # s：近闭合带时长上限（= 非闭合带下限）
+CLOSURE_DUR_OPEN_MAX      = 2.5     # s：非闭合带时长上限
+CLOSURE_DUR_FLOOR         = 0.05    # s：时长下限，防零时长闭合段
+CLOSURE_DUR_OPEN_PER_RAD  = 0.5     # s/rad：非闭合带时长随偏差的增长斜率
+
 
 class TrajectoryPlanner:
     """Trajectory planner that supports smooth acceleration and deceleration planning"""
@@ -150,7 +157,10 @@ class TimestampsTrajectoryPlanner:
     timestamps:  List[float] 相对秒, ts[0]=0.0（来自 PointLoader.get_timestamps）
     interpolate: 's_curve' | 'linear'（默认 'linear'）
     loop:        True=循环回放（耐久性）。循环边界在末点→首点之间补一段
-                 插值过渡（时长=平均段时长），避免硬跳导致机械臂过冲。
+                 插值过渡，时长由首末关节最大偏差 E 动态决定（见 _closure_duration）：
+                 E ≤ CLOSURE_ERR_THRESHOLD → [CLOSURE_DUR_FLOOR, CLOSURE_DUR_NEAR_MAX]s；
+                 E >  CLOSURE_ERR_THRESHOLD → [CLOSURE_DUR_NEAR_MAX, CLOSURE_DUR_OPEN_MAX]s。
+                 保证闭合段指令速度 E/wrap_dur 受控，避免硬跳导致机械臂过冲。
     """
 
     def __init__(self, waypoints, timestamps, interpolate='linear', loop=True):
@@ -163,19 +173,33 @@ class TimestampsTrajectoryPlanner:
         self._loop = loop
 
         if loop:
-            # 循环 wrap 段：末点 → 首点，时长 = 平均段时长（可构造参数覆盖）
-            wrap_dur = float(np.mean(np.diff(self._timestamps)))
+            # 循环 wrap 段：末点 → 首点，时长按首末关节偏差动态计算
+            wrap_dur = self._closure_duration(self._waypoints[0], self._waypoints[-1])
             self._cycle_wps = self._waypoints + [self._waypoints[0]]
             self._cycle_ts = self._timestamps + [self._timestamps[-1] + wrap_dur]
         else:
             self._cycle_wps = self._waypoints
             self._cycle_ts = self._timestamps
         self._cycle_len = self._cycle_ts[-1]
-
         self._trajectory_started = False
         self._start_time = None
         self._current_waypoint_index = 0
         self._last_target_position = None
+
+    def _closure_duration(self, first_wp, last_wp):
+        """末点→首点闭合段时长(s)：随最大关节角偏差 E 增大而增大。
+
+        E ≤ CLOSURE_ERR_THRESHOLD → [CLOSURE_DUR_FLOOR, CLOSURE_DUR_NEAR_MAX]s（近闭合）
+        E >  CLOSURE_ERR_THRESHOLD → [CLOSURE_DUR_NEAR_MAX, CLOSURE_DUR_OPEN_MAX]s
+        保证闭合段指令速度 E/wrap_dur 远低于 lim_vel，避免机械臂过冲。
+        """
+        E = max(abs(a - b) for a, b in zip(first_wp, last_wp))   # 最大关节角偏差 (rad)
+        if E <= CLOSURE_ERR_THRESHOLD:
+            # 近闭合：短闭合段（下限防零时长闭合段）
+            return max(CLOSURE_DUR_FLOOR, E / CLOSURE_ERR_THRESHOLD * CLOSURE_DUR_NEAR_MAX)
+        # 非闭合：随误差线性增长，封顶 CLOSURE_DUR_OPEN_MAX
+        return min(CLOSURE_DUR_OPEN_MAX,
+                   CLOSURE_DUR_NEAR_MAX + (E - CLOSURE_ERR_THRESHOLD) * CLOSURE_DUR_OPEN_PER_RAD)
 
     def start_trajectory(self):
         if not self._cycle_wps:
