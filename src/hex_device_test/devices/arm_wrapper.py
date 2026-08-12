@@ -15,7 +15,7 @@
 
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 
@@ -27,11 +27,6 @@ from hex_driver_robot import (
 )
 
 from .wrapper_base import WrapperBase, WrapperParams, GRIP_INFO_MAP
-
-
-# === 软接受超时 ===
-_RECV_TIMEOUT = 3.0          # 秒 — 接收超时判定
-_API_EXIT_TIMEOUT = 15.0     # 秒 — 超过此时长无数据视为 API 已退出
 
 # === 机器人分派表（key = robot_name 字符串）===
 # 仅支持 6 轴带夹爪机械臂。Archer / Firefly 的 callback 与 Params 字段集完全一致，
@@ -187,13 +182,6 @@ class ArmWrapper(WrapperBase):
         self._snapshot_current_state()
 
     def _snapshot_current_state(self):
-        """预分配后同步读一次机械臂/夹爪真实状态填入缓存。
-
-        消除 init 竞态：init_robot 返回前，work_loop 可能尚未派发第一次
-        *_state_cb，此时 _cache 仍是占位全零。这里直接同步读底层缓存，
-        保证 init 返回后 get_motor_positions() 立即返回真实位置（而非
-        [0,0,0,0,0,0]），避免手柄被命令拉到错误的全零起步点。
-        """
         if self._robot is None:
             return
         with self._cache_lock:

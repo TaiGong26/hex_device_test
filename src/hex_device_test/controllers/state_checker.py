@@ -109,6 +109,7 @@ class StateChecker:
         summary = dict(self._summary).copy()
         # 任务运行时长（HH:MM:SS），供 CsvLogger 的 data["run_time"]
         summary["run_time"] = self._fmt_run_time(time.time() - self._task_start_ts)
+        summary["start_time"] = self._task_start_time
         # errors（供 CsvLogger 的 " | ".join(list(data["errors"]))）
         summary["errors"] = [f"{e['error']}@{e['time']}" for e in self._error_history]
         return summary

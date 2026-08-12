@@ -8,6 +8,7 @@ ArmCoordinatorV2 — 重构版协调器
   - IPC 架构不变：Pipe + mp.Value
 """
 
+import logging
 import traceback
 from typing import Optional, List, Dict
 import threading
@@ -25,7 +26,6 @@ from ..statuses.ArmProcessIPC import ArmCommChannelManager
 
 
 class ArmCoordinatorV2(BaseCoordinator):
-    """重构版协调器——配置走构造函数，无 setter"""
 
     def __init__(self, device_ws_url_list: Optional[List[str]] = None,
                  enable_kcp: bool = False,
@@ -36,9 +36,10 @@ class ArmCoordinatorV2(BaseCoordinator):
                  interpolate: str = 'linear',
                  timestamps: Optional[List[float]] = None,
                  enable_view: bool = False,
-                 check_timeout: bool = False,
                  temp_csv_dir: Optional[str] = None):
         super().__init__()
+
+        self._logger = logging.getLogger("Coordinator")
 
         # 保存配置
         self._enable_kcp = enable_kcp
@@ -48,7 +49,6 @@ class ArmCoordinatorV2(BaseCoordinator):
         self._interpolate = interpolate
         self._timestamps = timestamps
         self._enable_view = enable_view
-        self._check_timeout = check_timeout
         self._temp_csv_dir = temp_csv_dir
 
         # 进程通信管理
@@ -79,7 +79,7 @@ class ArmCoordinatorV2(BaseCoordinator):
         - 创建和启动在同一循环完成
         """
         if device_ws_url_list is None:
-            print("device ip list is None")
+            self._logger.warning("device ip list is None")
             return False
 
         # 创建控制器（一步到位，所有配置通过构造函数传入）
@@ -103,7 +103,7 @@ class ArmCoordinatorV2(BaseCoordinator):
             )
             self._controllers_list.append(controller)
 
-        print(f"controllers {len(self._controllers_list)}")
+        self._logger.info("controllers %d", len(self._controllers_list))
         self._error_flag = [False] * len(self._controllers_list)
 
         # 启动所有控制器
@@ -156,19 +156,19 @@ class ArmCoordinatorV2(BaseCoordinator):
             t = time.strftime("%Y-%m-%d_%H-%M-%S")
             CSV_PATH = os.path.join(self._temp_csv_dir, f"arm_test_{t}.csv")
             write_csv(self._mp_queue, CSV_PATH)
-            print(f"[Coordinator] report written to {CSV_PATH}")
+            self._logger.info("report written to %s", CSV_PATH)
 
         self._ipc_clean()
         self._mp_queue.close()
         self._stop_event.set()
-        print("-------------------------------- Process shutdown ----------------------------------")
+        self._logger.info("-------------------------------- Process shutdown ----------------------------------")
 
     def _ipc_clean(self):
         """清理 IPC 通道"""
         try:
             self._arm_ipc.cleanup_all()
         except Exception as e:
-            print(f"[coordinator] IPC clean err: {e}")
+            self._logger.error("IPC clean err: %s", e)
 
     # ==================== 命令接口 ====================
 
@@ -182,9 +182,9 @@ class ArmCoordinatorV2(BaseCoordinator):
                         ipc.cmd_send_pipe.send(cmd)
                     elif isinstance(cmd, ArmCmdStatus):
                         ipc.cmd_send_pipe.send(cmd.value)
-            print(f"[Coordinator] send command: {ArmCmdStatus(cmd).name}")
+            self._logger.info("send command: %s", ArmCmdStatus(cmd).name)
         except Exception as e:
-            print(f"[Coordinator] 命令发送异常: {e}")
+            self._logger.error("命令发送异常: %s", e)
 
     def publish_dev_command(self, dev_id: int, cmd: int):
         """向指定设备发送命令"""
@@ -195,9 +195,9 @@ class ArmCoordinatorV2(BaseCoordinator):
                     ipc.cmd_send_pipe.send(cmd)
                 elif isinstance(cmd, ArmCmdStatus):
                     ipc.cmd_send_pipe.send(cmd.value)
-            print(f"[Coordinator] send command to dev{dev_id}: {ArmCmdStatus(cmd).name}")
+            self._logger.info("send command to dev%d: %s", dev_id, ArmCmdStatus(cmd).name)
         except Exception as e:
-            print(f"[Coordinator] 命令发送异常: {e}")
+            self._logger.error("命令发送异常: %s", e)
 
     # ==================== 状态查询 ====================
 
@@ -249,7 +249,7 @@ class ArmCoordinatorV2(BaseCoordinator):
 
                 time.sleep(0.01)  # 20Hz
         except Exception as e:
-            print(f"[Coordinator] 主循环异常: {e}")
+            self._logger.error("主循环异常: %s", e)
             traceback.print_exc()
 
     def _scan_device_states(self):
@@ -267,4 +267,4 @@ class ArmCoordinatorV2(BaseCoordinator):
             # 检查错误
             if error_status != ArmErrorStatus.Normal and not self._error_flag[device_id]:
                 self._error_flag[device_id] = True
-                print(f"[dev{device_id}] is error, reason: {error_status.name}")
+                self._logger.error("dev%d is error, reason: %s", device_id, error_status.name)

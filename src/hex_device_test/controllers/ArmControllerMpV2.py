@@ -25,10 +25,11 @@ run()
 
 
 import time
-import traceback
 import csv
 import os
 import signal
+import logging
+import traceback
 from typing import Optional, List
 import multiprocessing as mp
 
@@ -45,6 +46,7 @@ from .TrajectoryController import (
 from ..statuses.ArmProcessIPC import ArmCommChannel
 from ..statuses.ArmStatus import ArmControllerStatus, ArmErrorStatus
 from ..controllers.arm_state_machine_process import ArmControllerProcessStateMachine
+from ..tools.log_config import setup_logging
 
 
 class ArmControllerMpV2(BaseController):
@@ -59,9 +61,12 @@ class ArmControllerMpV2(BaseController):
                  timestamps: Optional[list] = None,
                  mp_queue: Optional[mp.Queue] = None,
                  temp_csv_dir: Optional[str] = None,
-                 enable_view: bool = False, check_timeout: bool = False,
+                 enable_view: bool = False, 
+                #  check_timeout: bool = False,
                  ):
         super().__init__(ws_url, 0, enable_kcp, task_loop_hz, device_id)
+
+        self._logger = logging.getLogger(f"Dev{self._device_id}")
 
         # 模块/设备配置
         self._arm_ipc = arm_ipc
@@ -77,7 +82,7 @@ class ArmControllerMpV2(BaseController):
         self._mp_queue = mp_queue
         self._temp_csv_dir = temp_csv_dir
         self._enable_view = enable_view
-        self._check_timeout = check_timeout
+        # self._check_timeout = check_timeout
 
         # 进程控制
         self._loop_running = mp.Event()
@@ -92,7 +97,7 @@ class ArmControllerMpV2(BaseController):
             self._task_process.start()
             return True
         except Exception as e:
-            print(f"[Device {self._device_id}, Exception]: {e}")
+            self._logger.error("start() failed: %s", e)
             traceback.print_exc()
             return False
 
@@ -105,9 +110,9 @@ class ArmControllerMpV2(BaseController):
                 self._task_process.terminate()
                 self._task_process.join()
         except RuntimeError as e:
-            print(f"[Controller {self._device_id}, RuntimeError]: {e}")
+            self._logger.error("shutdown RuntimeError: %s", e)
         except Exception as e:
-            print(f"[Controller {self._device_id}, Exception]: {e}")
+            self._logger.error("shutdown Exception: %s", e)
 
     # ==================== 子进程入口 ====================
 
@@ -124,13 +129,16 @@ class ArmControllerMpV2(BaseController):
         # 被 KeyboardInterrupt 中途打断、跳过 finally _close() 资源回收。
         signal.signal(signal.SIGINT, signal.SIG_IGN)
 
+        # 子进程入口确保日志配置（fork 下继承父进程 handler，此处幂等 no-op）
+        setup_logging()
+
         self.init_var()
 
         try:
             self.init_mod()
             self._loop_initialized = True
         except Exception as e:
-            print(f"[Dev {self._device_id}] init_mod failed: {e}")
+            self._logger.error("init_mod failed: %s", e)
             traceback.print_exc()
             self._loop_initialized = False
 
@@ -154,7 +162,7 @@ class ArmControllerMpV2(BaseController):
                     pass
 
                 except Exception as e:
-                    print(f"[Dev {self._device_id}] 循环异常: {e}")
+                    self._logger.error("循环异常: %s", e)
                     self._arm_ipc.set_error_status(ArmErrorStatus.ProcessError.value)
                     traceback.print_exc()
         finally:
@@ -221,10 +229,10 @@ class ArmControllerMpV2(BaseController):
                 interpolate=self._interpolate,
                 loop=True,
             )
-            print(
-                f"dev{self._device_id}: recorded trajectory, "
-                f"{len(self._waypoints)} waypoints, "
-                f"interpolate={self._interpolate}, loop=True"
+            self._logger.info(
+                "recorded trajectory, %d waypoints, "
+                "interpolate=%s, loop=True",
+                len(self._waypoints), self._interpolate,
             )
         elif self._waypoints:
             # 默认轨迹 → 均匀段时长驱动
@@ -236,9 +244,9 @@ class ArmControllerMpV2(BaseController):
                 segment_duration=duration,
                 interpolate=self._interpolate,
             )
-            print(
-                f"dev{self._device_id}: trajectory segment_duration={duration}s, "
-                f"interpolate={self._interpolate}"
+            self._logger.info(
+                "trajectory segment_duration=%ss, interpolate=%s",
+                duration, self._interpolate,
             )
 
         # CSV 日志文件（header 推迟到 error_check 发现设备后写入）
@@ -252,7 +260,7 @@ class ArmControllerMpV2(BaseController):
             )
             self._temp_csv_file = open(csv_path, 'w', newline='')
             self._temp_csv_writer = csv.writer(self._temp_csv_file)
-            print(f"dev{self._device_id}: temperature CSV -> {csv_path}")
+            self._logger.info("temperature CSV -> %s", csv_path)
 
 
     def state_check(self):
@@ -288,10 +296,10 @@ class ArmControllerMpV2(BaseController):
         if self._arm_ipc.get_error_status() == ArmErrorStatus.Normal.value:
             if (arm_err and any(arm_err)) or (grip_err and any(grip_err)):
                 self._arm_ipc.set_error_status(ArmErrorStatus.MotorError.value)
-                print(f"[Dev {self._device_id}] error detected -> error_status=MotorError")
+                self._logger.warning("error detected -> error_status=MotorError")
             elif robot_mode in ("RmOvertaken", "RmFatalError"):
                 self._arm_ipc.set_error_status(ArmErrorStatus.ArmError.value)
-                print(f"[Dev {self._device_id}] error detected -> error_status=ArmError")
+                self._logger.warning("error detected -> error_status=ArmError")
 
     def state_transition(self):
         """

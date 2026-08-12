@@ -23,6 +23,7 @@ def write_csv(mp_queue:Queue, file_path):
 
             for device_id, data in info.items():
                 row = {
+                    "start_time": data["start_time"],
                     "run_time": data["run_time"],
                     "device_id": device_id,
                     "state": data["state"],

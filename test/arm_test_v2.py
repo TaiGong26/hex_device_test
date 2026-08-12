@@ -15,6 +15,7 @@ from pathlib import Path
 from hex_device_test.managers.ArmCoordinatorV2 import ArmCoordinatorV2 as ArmCoordinator
 from hex_device_test.controllers.TrajectoryController import DEFAULT_SEGMENT_DURATION, CLOSURE_ERR_THRESHOLD
 from hex_device_test.tools.PointLoader import TaskConfigLoader
+from hex_device_test.tools.log_config import setup_logging
 
 
 
@@ -48,7 +49,7 @@ def main():
     parser.add_argument(
         '--KCP',
         action='store_true',
-        default=False,
+        default=True,
         help='Enable KCP protocol for HEX device connection'
     )
 
@@ -102,6 +103,8 @@ def main():
         print("Error: No device IPs provided. Please specify at least one device IP using the --url argument.")
         return
     print(f"Device IP list: {dev_ip_list}")
+    # 初始化日志：时间戳 + [tag] + 级别 + 颜色（构造 ArmCoordinator 之前，子进程 fork 继承）
+    setup_logging()
     enable_kcp = args.KCP
     enable_view = args.view
     temp_csv_dir = args.temp_csv_dir
@@ -154,10 +157,10 @@ def main():
             temp_csv_dir=temp_csv_dir,
         )
 
-        while True:
-            k = input()
-            if k == 'q' or k=='Q':
-                break
+        # while True:
+        #     k = input()
+        #     if k == 'q' or k=='Q':
+        #         break
             
     except KeyboardInterrupt:
         print("keyboard interrupt")

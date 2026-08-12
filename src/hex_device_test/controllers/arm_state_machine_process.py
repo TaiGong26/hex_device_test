@@ -1,5 +1,6 @@
 import threading
 import time
+import logging
 from typing import List,Optional
 
 from ..statuses.ArmProcessIPC import ArmCommChannel
@@ -42,6 +43,7 @@ class ArmCoordinatorProcessStateMachine:
     def __init__(self, coordinator):
         self._coordinator = coordinator
         self._state = ArmCoordinatorStatus.Init
+        self._logger = logging.getLogger("Coordinator")
         self._state_lock = threading.RLock()
         self._last_state_change = time.time()
         self._auto_send_cmd = False
@@ -53,10 +55,10 @@ class ArmCoordinatorProcessStateMachine:
                 return True
             
             if new_state not in self.STATE_TRANSITIONS.get(self._state, []):
-                print(f"[Coordinator] 非法状态转换: {self._state.name} -> {new_state.name}")
+                self._logger.warning("非法状态转换: %s -> %s", self._state.name, new_state.name)
                 return False
-            
-            print(f"[Coordinator] {self._state.name} -> {new_state.name} | reason: {reason}")
+
+            self._logger.info("%s -> %s | reason: %s", self._state.name, new_state.name, reason)
             self._state = new_state
             self._auto_send_cmd = True
             self._last_state_change = time.time()
@@ -268,6 +270,7 @@ class ArmControllerProcessStateMachine:
         self._first_start = True
         self._stopped_time = None
         self._dev_id = id
+        self._logger = logging.getLogger(f"Dev{self._dev_id}")
         # ============== return home =================
         self._return_home_controller:Optional[ReturnHomeController] = None
         self._home_position = [0.0, -1.5, 3.00, 0.0, 0.0, 0.0]
@@ -279,10 +282,10 @@ class ArmControllerProcessStateMachine:
             return True
         
         if new_state not in self.STATE_TRANSITIONS.get(self._state, []):
-            print(f"[Dev{self._dev_id}] 非法状态转换: {self._state.name} -> {new_state.name}")
+            self._logger.warning("非法状态转换: %s -> %s", self._state.name, new_state.name)
             return False
-        
-        print(f"[Dev{self._dev_id}] {self._state.name} -> {new_state.name} | {reason}")
+
+        self._logger.info("%s -> %s | %s", self._state.name, new_state.name, reason)
         self._state = new_state
         
         # 更新共享内存（仅在状态变化时）
