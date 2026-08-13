@@ -1,5 +1,6 @@
 # hex_device_test
 hex_device 多设备耐久性测试工具
+**如果你在使用hex_device，而不是hex_driver_robot，请拉取v1分支**
 
 > ⚠️ 仅限内部使用。
 
