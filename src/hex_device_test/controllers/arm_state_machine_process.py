@@ -1,13 +1,12 @@
 import threading
 import time
+import logging
 from typing import List,Optional
 
-from ..managers.Coordinator import ArmCoordinatorStatus
 from ..statuses.ArmProcessIPC import ArmCommChannel
 from ..statuses.ArmStatus import ArmControllerStatus, ArmCoordinatorStatus, ArmErrorStatus,ArmCmdStatus
-from  ..controllers.ErrorChecker import ArmErrorChecker
 from ..controllers.TrajectoryController import ReturnHomeController
-from hex_device import Arm, CommandType, Hands
+from ..devices.arm_wrapper import ArmWrapper
 
 class ArmCoordinatorProcessStateMachine:
     """
@@ -44,6 +43,7 @@ class ArmCoordinatorProcessStateMachine:
     def __init__(self, coordinator):
         self._coordinator = coordinator
         self._state = ArmCoordinatorStatus.Init
+        self._logger = logging.getLogger("Coordinator")
         self._state_lock = threading.RLock()
         self._last_state_change = time.time()
         self._auto_send_cmd = False
@@ -55,10 +55,10 @@ class ArmCoordinatorProcessStateMachine:
                 return True
             
             if new_state not in self.STATE_TRANSITIONS.get(self._state, []):
-                print(f"[Coordinator] 非法状态转换: {self._state.name} -> {new_state.name}")
+                self._logger.warning("非法状态转换: %s -> %s", self._state.name, new_state.name)
                 return False
-            
-            print(f"[Coordinator] {self._state.name} -> {new_state.name} | reason: {reason}")
+
+            self._logger.info("%s -> %s | reason: %s", self._state.name, new_state.name, reason)
             self._state = new_state
             self._auto_send_cmd = True
             self._last_state_change = time.time()
@@ -270,6 +270,7 @@ class ArmControllerProcessStateMachine:
         self._first_start = True
         self._stopped_time = None
         self._dev_id = id
+        self._logger = logging.getLogger(f"Dev{self._dev_id}")
         # ============== return home =================
         self._return_home_controller:Optional[ReturnHomeController] = None
         self._home_position = [0.0, -1.5, 3.00, 0.0, 0.0, 0.0]
@@ -281,10 +282,10 @@ class ArmControllerProcessStateMachine:
             return True
         
         if new_state not in self.STATE_TRANSITIONS.get(self._state, []):
-            print(f"[Dev{self._dev_id}] 非法状态转换: {self._state.name} -> {new_state.name}")
+            self._logger.warning("非法状态转换: %s -> %s", self._state.name, new_state.name)
             return False
-        
-        print(f"[Dev{self._dev_id}] {self._state.name} -> {new_state.name} | {reason}")
+
+        self._logger.info("%s -> %s | %s", self._state.name, new_state.name, reason)
         self._state = new_state
         
         # 更新共享内存（仅在状态变化时）
@@ -296,7 +297,7 @@ class ArmControllerProcessStateMachine:
     
     # ========== 状态处理函数 ==========
     
-    def handle_init(self, device: Arm) -> None:
+    def handle_init(self, device: ArmWrapper) -> None:
         """
         初始化状态
         - 执行：上线之后移动到home
@@ -323,7 +324,7 @@ class ArmControllerProcessStateMachine:
         
         target_position, reached_home = self._return_home_controller.get_target_position()
         if target_position is not None:
-            device.motor_command(CommandType.POSITION, target_position.tolist())    
+            device.motor_command("position", target_position.tolist())
         
         # Smooth and check Home
         if reached_home:
@@ -350,7 +351,7 @@ class ArmControllerProcessStateMachine:
         
         # 发送空命令，防止apiTimeout
     
-    def handle_running(self, device: Arm, target_position:Optional[List[float]]) -> None:
+    def handle_running(self, device: ArmWrapper, target_position:Optional[List[float]]) -> None:
         """
         Running状态
         - 执行：执行轨迹
@@ -360,7 +361,7 @@ class ArmControllerProcessStateMachine:
         
         target = target_position
         if target is not None and hasattr(target,"tolist"):
-            device.motor_command(CommandType.POSITION, target.tolist())
+            device.motor_command("position", target.tolist())
         
         # check cmd
         if self._check_cmd(ArmCmdStatus.STOPPED):
@@ -371,7 +372,7 @@ class ArmControllerProcessStateMachine:
             self.transition(ArmControllerStatus.Brake, "接收到BRAKE命令")
             return
         
-    def handle_stopped(self, device: Arm, last_cmd_position:Optional[List[float]]) -> None:
+    def handle_stopped(self, device: ArmWrapper, last_cmd_position:Optional[List[float]]) -> None:
         """
         Stopped状态
         - 执行：返回home
@@ -398,7 +399,7 @@ class ArmControllerProcessStateMachine:
         # 获取平滑归位目标位置
         target_position, reached_home = self._return_home_controller.get_target_position()
         if hasattr(target_position,"tolist"):
-            device.motor_command(CommandType.POSITION, target_position.tolist())
+            device.motor_command("position", target_position.tolist())
         
         # check home
         if reached_home:
@@ -411,14 +412,14 @@ class ArmControllerProcessStateMachine:
             self.transition(ArmControllerStatus.Exit, "stopped time out")
 
             
-    def handle_brake(self, device: Arm) -> None:
+    def handle_brake(self, device: ArmWrapper) -> None:
         """
         Brake状态
         - 执行：锁定当前位置
         - 转移：命令为STOPPED → Exit
         """
         # 锁定位置
-        device.motor_command(CommandType.BRAKE, [True] * device.motor_count)
+        device.motor_command("brake", [True] * device.motor_count)
         
         if self._check_cmd(ArmCmdStatus.STOPPED):
             err_state = ArmErrorStatus(self._arm_ipc.get_error_status())

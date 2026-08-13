@@ -33,10 +33,7 @@ class BaseCoordinator(ABC):
         # lock 
         self._status_lock = threading.Lock()
     
-    @abstractmethod
-    def start(self):
-        pass
-    
+
     @abstractmethod
     def shutdown(self):
         pass
