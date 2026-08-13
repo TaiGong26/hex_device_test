@@ -143,7 +143,7 @@ def main():
         )
 
     coordinator = None
-
+    
     try:
         coordinator = ArmCoordinator(
             dev_ip_list,
@@ -157,13 +157,14 @@ def main():
             temp_csv_dir=temp_csv_dir,
         )
 
-        # while True:
-        #     k = input()
-        #     if k == 'q' or k=='Q':
-        #         break
-            
+        while True:
+            # k = input()
+            # if k == 'q' or k=='Q':
+            #     break
+            time.sleep(1)
+        
     except KeyboardInterrupt:
-        print("keyboard interrupt")
+        pass
         
     except Exception as e:
         print(f"main error: {e}")
