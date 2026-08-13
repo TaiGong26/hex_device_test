@@ -26,7 +26,7 @@ def write_csv(mp_queue:Queue, file_path):
                     "start_time": data["start_time"],
                     "run_time": data["run_time"],
                     "device_id": device_id,
-                    "state": data["state"],
+                    # "state": data["state"],
                     "loop_counter": data["loop_counter"],
                 }
 
