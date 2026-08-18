@@ -95,6 +95,17 @@ python test/arm_test_v2.py --url ws://<IP>:8439 --traj-json /tmp/traj.json
 python test/arm_test_v2.py --url ws://<IP>:8439 --traj-json /tmp/traj.json --interp s_curve
 ```
 
+### 轨迹使用前测试
+
+如果你希望在使用录制轨迹之前测试轨迹效果，可以使用假臂，并开启`archer_view.py`来查看轨迹效果
+
+前置条件：
+- `pip install robomeshcat`
+- 修改`archer_view.py`的ip
+- 修改`archer_view.py`的`URDF_PATH`为urdf
+  - urdf可以通过`github.com/hexfellow`获取
+- 修改` MESH_DIR `为`URDF_PATH`的父目录
+
 ---
 
 ## 📄 waypoint JSON 规范
