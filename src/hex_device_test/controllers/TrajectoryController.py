@@ -1,7 +1,7 @@
 import time
 import numpy as np
 
-DEFAULT_SEGMENT_DURATION = 2.5   # 迁自 tools/trajectory_loader.py（旧格式加载器已删除）
+DEFAULT_SEGMENT_DURATION = 1.5   # 迁自 tools/trajectory_loader.py（旧格式加载器已删除）
 
 # ==== 循环闭合段参数（宏定义，便于调参）====
 CLOSURE_ERR_THRESHOLD     = 0.15    # rad：首末关节最大偏差阈值，≤ 用近闭合带

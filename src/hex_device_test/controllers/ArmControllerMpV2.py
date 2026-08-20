@@ -196,7 +196,7 @@ class ArmControllerMpV2(BaseController):
         4. ArmErrorChecker 全面错误扫描 → Brake / CSV / 可视化）"""
         # 状态机
         self._state_machine = ArmControllerProcessStateMachine(
-            self._device_id, self._arm_ipc
+            self._device_id, self._arm_ipc, self._waypoints[0]
         )
         # 设备状态表（温度 / 错误记录）
         self._device_state = StateChecker()

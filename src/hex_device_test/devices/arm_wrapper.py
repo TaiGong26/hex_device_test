@@ -317,8 +317,8 @@ class ArmWrapper(WrapperBase):
                 return
             self._robot.set_arm_pos_cmd({
                 "jnt_pos": [float(v) for v in values],
-                "lim_vel": 10.0,
-                "lim_acc": 10,
+                "lim_vel": 15.0,
+                "lim_acc": 15.0,
             })
 
         elif command_type == "brake":

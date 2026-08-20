@@ -263,7 +263,7 @@ class ArmControllerProcessStateMachine:
         ArmControllerStatus.Exit: []
     }
     
-    def __init__(self, id, arm_ipc: ArmCommChannel):
+    def __init__(self, id, arm_ipc: ArmCommChannel, frist_point):
         self._arm_ipc = arm_ipc
         self._state = ArmControllerStatus.Init
         self._last_reported_state = None
@@ -274,7 +274,8 @@ class ArmControllerProcessStateMachine:
         # ============== return home =================
         self._return_home_controller:Optional[ReturnHomeController] = None
         self._home_position = [0.0, -1.5, 3.00, 0.0, 0.0, 0.0]
-        self._return_home_duration = 10.0
+        self._return_home_duration = 5.0
+        self.frist_point = frist_point
     
     def transition(self, new_state: ArmControllerStatus, reason: str) -> bool:
         """状态转换并更新共享内存"""
@@ -314,8 +315,8 @@ class ArmControllerProcessStateMachine:
                 return
             self._return_home_controller = ReturnHomeController(
                 start_position=current_pos,
-                home_position=self._home_position,
-                duration=self._return_home_duration*0.8
+                home_position=self.frist_point if self.frist_point is not None else self._home_position,
+                duration=3
             )
         
         if self._check_cmd(ArmCmdStatus.STOPPED):
