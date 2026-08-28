@@ -94,6 +94,14 @@ def main():
         metavar='NAME',
         help='Robot model for all arms, one of: Archer_y6, Firefly_y6 (same for every device; default: Archer_y6)'
     )
+    
+    parser.add_argument(
+        '--segment_duration',
+        type=float,
+        default=None,
+        metavar='DIR',
+        help='Directory to write per-device motor temperature CSV files (e.g. /tmp/temp_logs)'
+    )
 
     # =============== parse args ===============
     args = parser.parse_args()
@@ -110,7 +118,7 @@ def main():
     temp_csv_dir = args.temp_csv_dir
     interpolate = args.interp
     timestamps = None
-    segment_duration = DEFAULT_SEGMENT_DURATION  # 修复 --traj-json 分支此前未赋值导致 NameError
+    segment_duration = args.segment_duration if not None else DEFAULT_SEGMENT_DURATION  # 修复 --traj-json 分支此前未赋值导致 NameError
 
     if args.traj_json is not None:
         if not args.traj_json.is_file():
