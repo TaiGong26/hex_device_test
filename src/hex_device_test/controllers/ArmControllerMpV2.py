@@ -391,7 +391,7 @@ class ArmControllerMpV2(BaseController):
         current_state = self._state_machine.get_state()
         error_status = self._arm_ipc.get_error_status()
 
-        device_key = f"{self.__ip}"
+        device_key = f"{self.__ip[5:]}"
         data = {}
 
         # 电机位置
