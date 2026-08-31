@@ -391,7 +391,7 @@ class ArmControllerMpV2(BaseController):
         current_state = self._state_machine.get_state()
         error_status = self._arm_ipc.get_error_status()
 
-        device_key = f"dev{self._device_id}"
+        device_key = f"{self.__ip}"
         data = {}
 
         # 电机位置
@@ -407,6 +407,19 @@ class ArmControllerMpV2(BaseController):
                       else self._target_pos)
             for i, v in enumerate(target):
                 data[f"{device_key}/target_position/joint{i}"] = float(v)
+
+        # motor temp
+        motor_temps = self._device.get_motor_temperatures()
+        if motor_temps is not None:
+            for i, v in enumerate(motor_temps):
+                data[f"{device_key}/motor_temps/joint{i}"] = float(v)
+        
+        # driver temp
+        drive_temps = self._device.get_motor_driver_temperatures()
+        if drive_temps is not None:
+            for i, v in enumerate(motor_temps):
+                data[f"{device_key}/drive_temps/joint{i}"] = float(v)
+        
 
         # 状态
         data[f"{device_key}/state"] = current_state.value
