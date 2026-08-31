@@ -67,6 +67,7 @@ class ArmControllerMpV2(BaseController):
         super().__init__(ws_url, 0, enable_kcp, task_loop_hz, device_id)
 
         self._logger = logging.getLogger(f"Dev{self._device_id}")
+        self.__ip = ws_url
 
         # 模块/设备配置
         self._arm_ipc = arm_ipc
@@ -449,6 +450,7 @@ class ArmControllerMpV2(BaseController):
                 report[self._device_id].update({
                     "state": self._state_machine.get_state().value,
                     "loop_counter": self._loop_counter,
+                    "device" : self.__ip
                 })
                 
                 
