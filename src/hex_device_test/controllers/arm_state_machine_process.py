@@ -274,7 +274,7 @@ class ArmControllerProcessStateMachine:
         # ============== return home =================
         self._return_home_controller:Optional[ReturnHomeController] = None
         self._home_position = [0.0, -1.5, 3.00, 0.0, 0.0, 0.0]
-        self._return_home_duration = 5.0
+        self._return_home_duration = 2.5
         self.frist_point = frist_point
     
     def transition(self, new_state: ArmControllerStatus, reason: str) -> bool:
@@ -316,7 +316,7 @@ class ArmControllerProcessStateMachine:
             self._return_home_controller = ReturnHomeController(
                 start_position=current_pos,
                 home_position=self.frist_point if self.frist_point is not None else self._home_position,
-                duration=3
+                duration=2.5
             )
         
         if self._check_cmd(ArmCmdStatus.STOPPED):

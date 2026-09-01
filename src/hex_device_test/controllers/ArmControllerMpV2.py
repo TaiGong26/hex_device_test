@@ -422,7 +422,7 @@ class ArmControllerMpV2(BaseController):
         
 
         # 状态
-        data[f"{device_key}/state"] = current_state.value
+        data[f"{device_key}/state"] = current_state.name
         data[f"{device_key}/error_code"] = error_status
 
         # session 信息
