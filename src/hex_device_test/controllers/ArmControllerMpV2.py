@@ -267,11 +267,14 @@ class ArmControllerMpV2(BaseController):
     def state_check(self):
         
         # 计算轨迹位置
-        self._target_pos = (self._trajectory.get_current_target()
-                            if self._trajectory else None)
         self._motor_pos = self._device.get_motor_positions()
-        self._last_pos = (self._trajectory.get_last_position()
-                          if self._trajectory else None)
+        
+        curr_state = self._state_machine.get_state()
+        if curr_state == ArmControllerStatus.Running:
+            self._target_pos = (self._trajectory.get_current_target()
+                                if self._trajectory else None)
+            self._last_pos = (self._trajectory.get_last_position()
+                            if self._trajectory else None)
         
         # temperature update
         mt = self._device.get_motor_temperatures()
@@ -337,7 +340,7 @@ class ArmControllerMpV2(BaseController):
                 self._update_loop_count()
 
         elif current_state == ArmControllerStatus.Stopped:
-            self._state_machine.handle_stopped(self._device, self._last_pos)
+            self._state_machine.handle_stopped(self._device, self._motor_pos)
 
         elif current_state == ArmControllerStatus.Brake:
             self._state_machine.handle_brake(self._device)

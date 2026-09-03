@@ -373,7 +373,7 @@ class ArmControllerProcessStateMachine:
             self.transition(ArmControllerStatus.Brake, "接收到BRAKE命令")
             return
         
-    def handle_stopped(self, device: ArmWrapper, last_cmd_position:Optional[List[float]]) -> None:
+    def handle_stopped(self, device: ArmWrapper, last_position:Optional[List[float]]) -> None:
         """
         Stopped状态
         - 执行：返回home
@@ -384,14 +384,14 @@ class ArmControllerProcessStateMachine:
         # 返回home
         if self._return_home_controller is None:
             # 获取trajectory的最后命令位置，不是当前实际位置
-            last_cmd_position = last_cmd_position
-            if last_cmd_position is None:
+            last_position = last_position
+            if last_position is None:
                 # 如果没有trajectory，使用当前实际位置
-                last_cmd_position = device.get_motor_positions()
-            if hasattr(last_cmd_position,"tolist"):
-                last_cmd_position = last_cmd_position.tolist()
+                last_position = device.get_motor_positions()
+            if hasattr(last_position,"tolist"):
+                last_position = last_position.tolist()
             self._return_home_controller = ReturnHomeController(
-                start_position=last_cmd_position,
+                start_position=last_position,
                 home_position=self._home_position,
                 duration=self._move_stable_duration
             )
