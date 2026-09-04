@@ -1,8 +1,6 @@
-from queue import Queue
+from queue import Empty, Queue
 import os
 import csv
-import time
-from typing import List, Dict
 
 from ..statuses.ArmStatus import ArmControllerStatus, ArmErrorStatus
 
@@ -11,52 +9,68 @@ from ..statuses.ArmStatus import ArmControllerStatus, ArmErrorStatus
 column -s, -t ~/hex_device_log/arm_test_xxx.csv | less
 
 """
-def write_csv(mp_queue:Queue, file_path):
+def write_csv(mp_queue: Queue, file_path):
+    """Drain controller summaries and write a CSV with a stable union schema.
+
+    Different devices may expose different columns (for example, a device that
+    failed during initialization has no temperature values).  Build every row
+    before creating DictWriter so the first queue item cannot accidentally
+    define an incomplete header.
+    """
     file_path = os.path.expanduser(file_path)
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    
-    with open(file_path, 'w', newline='', encoding='utf-8') as f:
-        writer = None
+    directory = os.path.dirname(file_path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
 
-        while not mp_queue.empty():
-            info = mp_queue.get()
+    rows = []
+    while True:
+        try:
+            # multiprocessing.Queue.empty() is not reliable because its feeder
+            # thread may still be transferring an already-put report.
+            info = mp_queue.get(timeout=0.2)
+        except Empty:
+            break
 
-            for device_id, data in info.items():
-                row = {
-                    "start_time": data["start_time"],
-                    "run_time": data["run_time"],
-                    "device_id": device_id,
-                    "device": data["device"],
-                    # "state": data["state"],
-                    "loop_counter": data["loop_counter"],
-                }
+        for device_id, data in info.items():
+            row = {
+                "start_time": data.get("start_time", ""),
+                "run_time": data.get("run_time", ""),
+                "device_id": device_id,
+                "device": data.get("device", ""),
+                "loop_counter": data.get("loop_counter", 0),
+            }
 
-                # 展开电机最高温（controller 键 motor_temp_max）
-                motors = data["motor_temp_max"] or []
-                for i, v in enumerate(motors):
-                    row[f"MAX_motor_{i}_temp"] = v
+            for i, value in enumerate(data.get("motor_temp_max") or []):
+                row[f"MAX_motor_{i}_temp"] = value
+            for i, value in enumerate(data.get("motor_temp_min") or []):
+                row[f"MIN_motor_{i}_temp"] = value
+            for i, value in enumerate(data.get("driver_temp_max") or []):
+                row[f"MAX_driver_{i}_temp"] = value
+            for i, value in enumerate(data.get("driver_temp_min") or []):
+                row[f"MIN_driver_{i}_temp"] = value
 
-                # 展开电机最低温（controller 键 motor_temp_min）
-                m_mins = data["motor_temp_min"] or []
-                for i, v in enumerate(m_mins):
-                    row[f"MIN_motor_{i}_temp"] = v
+            row["errors"] = " | ".join(data.get("errors") or [])
+            rows.append(row)
 
-                # 展开驱动最高温（controller 键 driver_temp_max）
-                drivers = data["driver_temp_max"] or []
-                for i, v in enumerate(drivers):
-                    row[f"MAX_driver_{i}_temp"] = v
+    if not rows:
+        return
 
-                # 展开驱动最低温（controller 键 driver_temp_min）
-                d_mins = data["driver_temp_min"] or []
-                for i, v in enumerate(d_mins):
-                    row[f"MIN_driver_{i}_temp"] = v
+    base_fields = [
+        "start_time",
+        "run_time",
+        "device_id",
+        "device",
+        "loop_counter",
+    ]
+    dynamic_fields = sorted({
+        key
+        for row in rows
+        for key in row
+        if key not in base_fields and key != "errors"
+    })
+    fieldnames = base_fields + dynamic_fields + ["errors"]
 
-                # errors（转字符串）
-                row["errors"] = " | ".join(list(data["errors"]))
-
-                # 初始化 writer
-                if writer is None:
-                    writer = csv.DictWriter(f, fieldnames=row.keys())
-                    writer.writeheader()
-
-                writer.writerow(row)
+    with open(file_path, "w", newline="", encoding="utf-8") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
