@@ -274,7 +274,7 @@ class ArmControllerProcessStateMachine:
         # ============== return home =================
         self._return_home_controller:Optional[ReturnHomeController] = None
         self._home_position = [0.0, -1.5, 3.00, 0.0, 0.0, 0.0]
-        self._return_home_duration = 5.0
+        self._move_stable_duration = 2.5
         self.frist_point = frist_point
     
     def transition(self, new_state: ArmControllerStatus, reason: str) -> bool:
@@ -316,7 +316,7 @@ class ArmControllerProcessStateMachine:
             self._return_home_controller = ReturnHomeController(
                 start_position=current_pos,
                 home_position=self.frist_point if self.frist_point is not None else self._home_position,
-                duration=3
+                duration=self._move_stable_duration
             )
         
         if self._check_cmd(ArmCmdStatus.STOPPED):
@@ -373,7 +373,7 @@ class ArmControllerProcessStateMachine:
             self.transition(ArmControllerStatus.Brake, "接收到BRAKE命令")
             return
         
-    def handle_stopped(self, device: ArmWrapper, last_cmd_position:Optional[List[float]]) -> None:
+    def handle_stopped(self, device: ArmWrapper, last_position:Optional[List[float]]) -> None:
         """
         Stopped状态
         - 执行：返回home
@@ -384,16 +384,16 @@ class ArmControllerProcessStateMachine:
         # 返回home
         if self._return_home_controller is None:
             # 获取trajectory的最后命令位置，不是当前实际位置
-            last_cmd_position = last_cmd_position
-            if last_cmd_position is None:
+            last_position = last_position
+            if last_position is None:
                 # 如果没有trajectory，使用当前实际位置
-                last_cmd_position = device.get_motor_positions()
-            if hasattr(last_cmd_position,"tolist"):
-                last_cmd_position = last_cmd_position.tolist()
+                last_position = device.get_motor_positions()
+            if hasattr(last_position,"tolist"):
+                last_position = last_position.tolist()
             self._return_home_controller = ReturnHomeController(
-                start_position=last_cmd_position,
+                start_position=last_position,
                 home_position=self._home_position,
-                duration=self._return_home_duration
+                duration=self._move_stable_duration
             )
             self._stopped_time = time.process_time()
 

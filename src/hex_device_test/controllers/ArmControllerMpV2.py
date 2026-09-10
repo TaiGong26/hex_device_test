@@ -67,6 +67,7 @@ class ArmControllerMpV2(BaseController):
         super().__init__(ws_url, 0, enable_kcp, task_loop_hz, device_id)
 
         self._logger = logging.getLogger(f"Dev{self._device_id}")
+        self.__ip = ws_url
 
         # 模块/设备配置
         self._arm_ipc = arm_ipc
@@ -266,11 +267,14 @@ class ArmControllerMpV2(BaseController):
     def state_check(self):
         
         # 计算轨迹位置
-        self._target_pos = (self._trajectory.get_current_target()
-                            if self._trajectory else None)
         self._motor_pos = self._device.get_motor_positions()
-        self._last_pos = (self._trajectory.get_last_position()
-                          if self._trajectory else None)
+        
+        curr_state = self._state_machine.get_state()
+        if curr_state == ArmControllerStatus.Running:
+            self._target_pos = (self._trajectory.get_current_target()
+                                if self._trajectory else None)
+            self._last_pos = (self._trajectory.get_last_position()
+                            if self._trajectory else None)
         
         # temperature update
         mt = self._device.get_motor_temperatures()
@@ -336,7 +340,7 @@ class ArmControllerMpV2(BaseController):
                 self._update_loop_count()
 
         elif current_state == ArmControllerStatus.Stopped:
-            self._state_machine.handle_stopped(self._device, self._last_pos)
+            self._state_machine.handle_stopped(self._device, self._motor_pos)
 
         elif current_state == ArmControllerStatus.Brake:
             self._state_machine.handle_brake(self._device)
@@ -390,7 +394,7 @@ class ArmControllerMpV2(BaseController):
         current_state = self._state_machine.get_state()
         error_status = self._arm_ipc.get_error_status()
 
-        device_key = f"dev{self._device_id}"
+        device_key = f"{self.__ip[5:]}"
         data = {}
 
         # 电机位置
@@ -407,8 +411,21 @@ class ArmControllerMpV2(BaseController):
             for i, v in enumerate(target):
                 data[f"{device_key}/target_position/joint{i}"] = float(v)
 
+        # motor temp
+        motor_temps = self._device.get_motor_temperatures()
+        if motor_temps is not None:
+            for i, v in enumerate(motor_temps):
+                data[f"{device_key}/motor_temps/joint{i}"] = float(v)
+        
+        # driver temp
+        drive_temps = self._device.get_motor_driver_temperatures()
+        if drive_temps is not None:
+            for i, v in enumerate(motor_temps):
+                data[f"{device_key}/drive_temps/joint{i}"] = float(v)
+        
+
         # 状态
-        data[f"{device_key}/state"] = current_state.value
+        data[f"{device_key}/state"] = current_state.name
         data[f"{device_key}/error_code"] = error_status
 
         # session 信息
@@ -449,6 +466,7 @@ class ArmControllerMpV2(BaseController):
                 report[self._device_id].update({
                     "state": self._state_machine.get_state().value,
                     "loop_counter": self._loop_counter,
+                    "device" : self.__ip
                 })
                 
                 

@@ -34,6 +34,7 @@ python test/arm_test_v2.py --url ws://xx.xx.xx.xx:8439
 - --interp                  选择插值方式['s_curve', 'linear'], 默认liner, 仅支持在导入的waypoint中使用。
 - --view                    开始可视化
 - --temp-csv-dir            输出路径；默认None，不输出
+- --segment_duration        固定轨迹中点到点的时间间隔
 
 
 #### 使用须知
