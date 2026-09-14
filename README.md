@@ -29,7 +29,7 @@ python test/arm_test_v2.py --url ws://xx.xx.xx.xx:8439
 
 #### 参数说明
 - --url                     必选项，输入一个连接地址
-- --robot-type              机械臂类型["Archer_y6", "Firefly_y6"], 默认Archer_y6, 仅支持同时开启一种机械形
+- --robot-type              机械臂类型["Archer_y6", "Firefly_y6", "Firefly_y6_H2_40"], 默认Archer_y6, 仅支持同时开启一种机械形
 - --traj-json               导入的轨迹点
 - --interp                  选择插值方式['s_curve', 'linear'], 默认liner, 仅支持在导入的waypoint中使用。
 - --view                    开始可视化

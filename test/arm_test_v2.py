@@ -127,10 +127,10 @@ def main():
     parser.add_argument(
         '--robot-type',
         type=str,
-        choices=["Archer_y6", "Firefly_y6"],
+        choices=["Archer_y6", "Firefly_y6", "Firefly_y6_H2_40"],
         default="Archer_y6",
         metavar='NAME',
-        help='Robot model for all arms, one of: Archer_y6, Firefly_y6 (same for every device; default: Archer_y6)'
+        help='Robot model for all arms, one of: Archer_y6, Firefly_y6, Firefly_y6_H2_40 (same for every device; default: Archer_y6)'
     )
     
     parser.add_argument(

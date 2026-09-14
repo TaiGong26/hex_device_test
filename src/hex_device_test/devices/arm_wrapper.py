@@ -24,6 +24,8 @@ from hex_driver_robot import (
     HexRobotArcherY6Params,
     HexRobotFireflyY6Callback,
     HexRobotFireflyY6Params,
+    HexRobotFireflyY6H2_40Callback,
+    HexRobotFireflyY6H2_40Params,
 )
 
 from .wrapper_base import WrapperBase, WrapperParams, GRIP_INFO_MAP
@@ -34,6 +36,7 @@ from .wrapper_base import WrapperBase, WrapperParams, GRIP_INFO_MAP
 ARM_ROBOT_DISPATCH = {
     "Archer_y6":  (HexRobotArcherY6Callback,  HexRobotArcherY6Params),
     "Firefly_y6": (HexRobotFireflyY6Callback, HexRobotFireflyY6Params),
+    "Firefly_y6_H2_40": (HexRobotFireflyY6H2_40Callback, HexRobotFireflyY6H2_40Params),
 }
 
 
@@ -46,7 +49,7 @@ class ArmWrapper(WrapperBase):
         motor_command(...)/get_*()  → 正常控制/读取
         shutdown()                  → 停止 work_loop → 关闭连接
 
-    机器人分派：仅支持 6 轴带夹爪机械臂（Archer_y6 / Firefly_y6）。
+    机器人分派：仅支持 6 轴带夹爪机械臂（Archer_y6 / Firefly_y6 / Firefly_y6_H2_40）。
       直接按 params.robot_name 字符串查找 ARM_ROBOT_DISPATCH 创建对应 callback + param 类。
     """
 
