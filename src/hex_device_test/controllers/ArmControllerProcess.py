@@ -11,7 +11,7 @@ import os
 # mp.set_start_method('forkserver', force=True)
 
 from hex_device import Hands, HexDeviceApi
-from hex_device import Arm
+from hex_device import Arm, CommandType
 
 from hex_device_test.controllers.ErrorChecker import ArmErrorChecker
 from ..tools.plotjuggle import PlotjuggleDraw
@@ -274,7 +274,7 @@ class ArmControllerMp(BaseController):
         hex_api = HexDeviceApi(ws_url=ws_url, local_port=0, enable_kcp=enable_kcp)
         device = None
         hands:Optional[Hands] = None
-        
+        hands_first_time = True
         trajectory = None
         
         if waypoints:
@@ -341,15 +341,21 @@ class ArmControllerMp(BaseController):
                                 print(f"dev{device_id}: robot_type{device.robot_type}")
                                 break
                     
+                    # 以下放在循环内
                     if hands is None:
                         for hand in hex_api.optional_device_list:
-                            if isinstance(device, Hands):
+                            if isinstance(hand, Hands):
                                 hands = hand
-                                if hands.has_new_data():
-                                    if hands_first_time:
-                                        hands_first_time = False
-                                        
-                                        
+                                break
+
+                    if hands is not None:
+                        if hands.has_new_data():
+                            if hands_first_time:
+                                hands.motor_command(
+                                    CommandType.TORQUE,
+                                    [0.0] * hands.motor_count,
+                                )
+                                hands_first_time = False
                                         
                     if device is None:
                         time.sleep(task_interval)
